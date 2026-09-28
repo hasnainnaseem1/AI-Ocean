@@ -1,0 +1,39 @@
+{
+  "section": {
+    "infrastructure": "Infraestructura",
+    "support": "Soporte"
+  },
+  "item": {
+    "overview": "Resumen",
+    "models": "Modelos",
+    "machineTypes": "Tipos de máquina",
+    "deployments": "Despliegues",
+    "supportTicket": "Ticket de soporte",
+    "myProfile": "Mi perfil",
+    "usageLimits": "Límites de consumo",
+    "billing": "Facturación"
+  },
+  "badge": {
+    "new": "NUEVO"
+  },
+  "sidebar": {
+    "open": "Abrir barra lateral",
+    "close": "Cerrar barra lateral"
+  },
+  "header": {
+    "searchPlaceholder": "Buscar modelos…",
+    "lightMode": "Modo claro",
+    "darkMode": "Modo oscuro"
+  },
+  "account": {
+    "signOut": "Cerrar sesión"
+  },
+  "chat": {
+    "title": "Chat de soporte",
+    "subtitle": "Solemos responder en unas horas",
+    "placeholder": "Escribe un mensaje…",
+    "notConnected": "El chat aún no está conectado",
+    "open": "Chat de soporte",
+    "close": "Cerrar chat"
+  }
+}

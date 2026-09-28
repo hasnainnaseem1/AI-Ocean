@@ -1,0 +1,14 @@
+{
+  "title": "Notificaciones",
+  "markAllRead": "Marcar todo como leído",
+  "loading": "Cargando…",
+  "empty": "Aquí no hay nada todavía.",
+  "open": "Abrir",
+  "context": {
+    "deployments": "Despliegues",
+    "wallet": "Monedero",
+    "modelCatalog": "Catálogo de modelos",
+    "account": "Cuenta",
+    "updates": "Novedades"
+  }
+}

@@ -1,0 +1,462 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * The app's text face, as a variable so the language can change it.
+ *
+ * Most text in this app is in plain inline-styled divs rather than antd
+ * components, so antd's `token.fontFamily` alone does not reach it — it has to
+ * come from `body`. LanguageProvider rewrites these two custom properties when
+ * the language changes (Nastaliq for Urdu, Noto Sans Arabic for Arabic, and so
+ * on); the values below are the Latin default and what a first paint uses.
+ */
+:root {
+  --app-font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Roboto', 'Helvetica Neue', sans-serif;
+  /*
+   * A multiplier, not a line-height. Nastaliq's sloping baseline and deep
+   * descenders need roughly twice the leading Latin does, or every table row
+   * clips — so line-height is expressed relative to this rather than fixed.
+   */
+  --app-line-height-scale: 1;
+}
+
+/* Optional: Custom base styles */
+body {
+  margin: 0;
+  font-family: var(--app-font);
+  line-height: calc(1.5 * var(--app-line-height-scale));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
+}
+
+/* antd's Sider wraps its children in `.ant-layout-sider-children`, a plain
+ * block div — the `display:flex; flex-direction:column` applied to the
+ * Sider itself has no effect on its own children because of that extra
+ * wrapper, so a `flex:1` nav section never actually grows to push the
+ * bottom user card down to the true bottom of the sidebar. Making the
+ * wrapper itself a flex column fixes that at the source. */
+.ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ── Sidebar nav — dark mode ─────────────────────────────────────────────
+ * antd's Menu `theme="dark"` computes its own selected/hover fill from the
+ * dark algorithm, which comes out as a solid, heavy block — not the soft
+ * tinted pill the light theme gets. Overridden directly so the active item
+ * stays a quiet tint instead of reading like a filled button.
+ */
+.dark .ant-menu-dark .ant-menu-item-selected {
+  background: rgba(94, 124, 247, 0.16) !important;
+}
+.dark .ant-menu-dark .ant-menu-item-selected,
+.dark .ant-menu-dark .ant-menu-item-selected .anticon,
+.dark .ant-menu-dark .ant-menu-item-selected a {
+  color: #A9BBFF !important;
+}
+.dark .ant-menu-dark .ant-menu-item:not(.ant-menu-item-selected):hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #E8EAF4 !important;
+}
+
+/* ── Typography ──────────────────────────────────────────────────────────
+ * One family throughout — headings are simply heavier and tighter-tracked
+ * than body text, so there is no second face to clash with the UI.
+ */
+.ant-typography-title,
+h1.ant-typography, h2.ant-typography, h3.ant-typography, h4.ant-typography {
+  font-weight: 800 !important;
+  letter-spacing: -0.025em;
+}
+.ant-statistic-content {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Table treatment ─────────────────────────────────────────────────────
+ * Small uppercase header, no header fill, hairline rows and a soft indigo
+ * hover wash — matches the light, airy card surfaces rather than antd's
+ * default grey banding.
+ */
+.ledger-table .ant-table-thead > tr > th {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  border-bottom: 1px solid #ECEFF8;
+}
+.dark .ledger-table .ant-table-thead > tr > th {
+  border-bottom-color: #242942;
+}
+.ledger-table .ant-table-tbody > tr:hover > td {
+  background: #F7F9FF !important;
+}
+.dark .ledger-table .ant-table-tbody > tr:hover > td {
+  background: rgba(112, 137, 245, 0.07) !important;
+}
+
+/* Dashboard deployment rows — the rate column is the first thing to go on a
+ * narrow screen, so the deployment name keeps the room it needs to stay
+ * readable instead of being squeezed to nothing. */
+.dep-rate { width: 96px; text-align: end; flex-shrink: 0; }
+.dep-status { width: 116px; display: flex; justify-content: flex-end; flex-shrink: 0; }
+@media (max-width: 700px) {
+  .dep-rate { display: none; }
+  .dep-status { width: auto; }
+}
+
+/* Borderless header search — sits on a soft filled pill rather than an
+ * outlined box, so the top bar stays visually quiet. */
+.header-search,
+.header-search:hover,
+.header-search:focus-within {
+  border: none !important;
+  box-shadow: none !important;
+}
+.header-search input {
+  background: transparent !important;
+}
+
+/* ── Gradient CTA ────────────────────────────────────────────────────────
+ * Reserved for the single most important action on a screen. Kept as a
+ * class so the gradient is defined once, and so the hover state can lift
+ * without re-declaring the fill.
+ */
+.btn-gradient,
+.btn-gradient:hover,
+.btn-gradient:focus {
+  background: linear-gradient(135deg, #6EA8FE 0%, #4F6BED 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 4px 14px rgba(79, 107, 237, 0.32);
+}
+.btn-gradient:hover {
+  box-shadow: 0 6px 20px rgba(79, 107, 237, 0.42);
+  transform: translateY(-1px);
+}
+.btn-gradient {
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+/* ── Motion & depth system ──────────────────────────────────────────────
+ * A handful of shared classes so "lift on hover" and "status pulse" are
+ * defined once instead of re-implemented per page with onMouseEnter state.
+ * Respects prefers-reduced-motion throughout.
+ */
+.card-hover {
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+}
+
+/* The model catalog is the primary browse/pick surface, so its cards get an
+ * indigo-tinted border shift on top of the shared lift — a small signal that
+ * this is the interaction that matters most on the page. */
+.spec-card:hover {
+  border-color: #4F6BED !important;
+}
+.dark .spec-card:hover {
+  border-color: #7089F5 !important;
+}
+
+.row-hover {
+  transition: background-color 120ms ease;
+}
+.row-hover:hover {
+  background: #F5F7FD;
+}
+.dark .row-hover:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.avatar-interactive {
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.avatar-interactive:hover {
+  transform: scale(1.06);
+}
+
+.fade-in {
+  animation: aio-fade-in 220ms ease both;
+}
+
+@keyframes aio-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.status-dot {
+  position: relative;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  animation: aio-pulse 2s ease-out infinite;
+}
+
+@keyframes aio-pulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* Skeleton shimmer used by PageSkeleton */
+.aio-skeleton {
+  background: linear-gradient(90deg, var(--aio-sk-base) 25%, var(--aio-sk-shine) 37%, var(--aio-sk-base) 63%);
+  background-size: 400% 100%;
+  animation: aio-shimmer 1.6s ease infinite;
+  border-radius: 8px;
+}
+:root { --aio-sk-base: #EDF0F9; --aio-sk-shine: #F8FAFF; }
+.dark-skeleton { --aio-sk-base: #1E2440; --aio-sk-shine: #2A3153; }
+
+@keyframes aio-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ── Deploy journey ──────────────────────────────────────────────────────
+ * The journey shows one question at a time, so the transition between them
+ * carries the sense of moving forward that a scrolling form gets for free.
+ * Outgoing content lifts and fades, incoming rises into place.
+ *
+ * Deliberately hand-rolled rather than pulling in an animation library for
+ * two keyframes — the rest of this app's motion works the same way.
+ */
+.journey-enter {
+  animation: aio-journey-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.journey-exit {
+  animation: aio-journey-out 180ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+.journey-back .journey-enter {
+  animation-name: aio-journey-in-back;
+}
+
+@keyframes aio-journey-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes aio-journey-in-back {
+  from { opacity: 0; transform: translateY(-18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes aio-journey-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-14px); }
+}
+
+/* Options cascade in so a list of six choices doesn't arrive as one slab */
+.journey-option {
+  animation: aio-journey-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* The live sizing chip pulses once when its numbers actually change */
+.sizing-bump {
+  animation: aio-sizing-bump 420ms ease;
+}
+@keyframes aio-sizing-bump {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+/* Thinking indicator while the recommendation is computed */
+.journey-thinking span {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: aio-thinking 1.1s ease-in-out infinite;
+}
+.journey-thinking span:nth-child(2) { animation-delay: 0.15s; }
+.journey-thinking span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes aio-thinking {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40%           { opacity: 1;    transform: translateY(-5px); }
+}
+
+/* ── Print ───────────────────────────────────────────────────────────────
+ * An invoice is a document people actually print or save as PDF, so the
+ * app chrome around it (sidebar, header, chat launcher, its own toolbar)
+ * has to drop away and leave the card on a plain white page.
+ */
+@media print {
+  .ant-layout-sider,
+  .ant-layout-header,
+  .no-print {
+    display: none !important;
+  }
+  .ant-layout,
+  .ant-layout-content {
+    margin: 0 !important;
+    background: #fff !important;
+  }
+  .ant-card {
+    border: none !important;
+    box-shadow: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-hover, .card-hover:hover, .fade-in, .status-dot.pulse::after, .aio-skeleton,
+  .journey-enter, .journey-exit, .journey-option, .sizing-bump, .journey-thinking span {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+  /* Suppressing the animation must not suppress the content with it — these
+     all animate from opacity 0, so they need it restored explicitly. */
+  .journey-enter, .journey-exit, .journey-option, .journey-thinking span {
+    opacity: 1 !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Data tables must scroll inside themselves, never push the page sideways.
+
+   antd gives a <Table scroll={{x}}> an overflow-x container, but a flex or
+   grid child defaults to `min-width: auto`, which refuses to shrink below its
+   content — so the container never actually became narrower than the table and
+   the whole document scrolled instead. Letting the wrapper shrink is what makes
+   the table's own scrollbar engage.
+   ───────────────────────────────────────────────────────────────────────── */
+.ant-table-wrapper {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ant-table-wrapper .ant-table-content {
+  overflow-x: auto;
+}
+
+/* Same reasoning for the cards and columns tables sit in. */
+.ant-card,
+.ant-col,
+.ant-tabs-tabpane {
+  min-width: 0;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Phone widths: horizontal control rows wrap or scroll instead of pushing
+   the page sideways.
+
+   Toolbars (`Space`), the segmented tab switcher and wide primary buttons
+   were each laid out on one line at any width, so on a 375px screen they hung
+   off the right edge and took the whole document with them.
+   ───────────────────────────────────────────────────────────────────────── */
+@media (max-width: 575px) {
+  /* Button/filter toolbars stack rather than run off the edge */
+  .ant-space-horizontal {
+    flex-wrap: wrap;
+  }
+
+  /* The segmented control scrolls within itself, like a tab strip should */
+  .ant-segmented {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  /* A button captioned "Save Customer Settings" cannot be 200px on a phone */
+  .ant-btn {
+    max-width: 100%;
+  }
+  .ant-btn > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /*
+     Pinned columns become ordinary ones on a phone.
+
+     `rowActions` marks the actions column `fixed: 'right'`, which antd
+     implements as a sticky cell floating above the scrolling table. On a
+     375px screen that cell sits on top of the columns underneath it — the
+     customers table rendered its "Actions" header overlapping "Status".
+     There isn't room to pin anything at this width, so let them scroll.
+  */
+  /* antd names these -start/-end in current versions and -left/-right in
+     older ones; cover both so this keeps working across an upgrade. */
+  .ant-table-cell-fix,
+  .ant-table-cell-fix-start,
+  .ant-table-cell-fix-end,
+  .ant-table-cell-fix-left,
+  .ant-table-cell-fix-right {
+    position: static !important;
+    inset-inline-end: auto !important;
+    inset-inline-start: auto !important;
+  }
+  .ant-table-cell-fix-end-shadow,
+  .ant-table-cell-fix-start-shadow,
+  .ant-table-cell-fix-left-last::after,
+  .ant-table-cell-fix-right-first::after {
+    box-shadow: none !important;
+  }
+}
+
+/* ── Right-to-left ────────────────────────────────────────────────────────
+ *
+ * antd 6 mirrors its own components from <ConfigProvider direction="rtl">, and
+ * the app's own styles use logical properties, so almost nothing needs help
+ * here. These are the exceptions — the things a direction flip cannot infer.
+ */
+
+/*
+ * Back/next arrows.
+ *
+ * All 34 arrow icons in this app are semantic: "go back", "continue", "open".
+ * In a right-to-left layout "back" points right, so every one of them has to
+ * mirror — which is exactly why this is one rule and not 34 wrapper components.
+ * @ant-design/icons puts a stable class on every instance, so the selector is
+ * reliable, and one rule in one place cannot drift the way 34 call sites do.
+ *
+ * `.no-rtl-flip` is the escape hatch for a decorative arrow that means a
+ * direction in space rather than in the flow. There are none today.
+ */
+[dir="rtl"] .anticon-arrow-left,
+[dir="rtl"] .anticon-arrow-right,
+[dir="rtl"] .anticon-left,
+[dir="rtl"] .anticon-right,
+[dir="rtl"] .anticon-double-left,
+[dir="rtl"] .anticon-double-right {
+  transform: scaleX(-1);
+}
+
+[dir="rtl"] .no-rtl-flip {
+  transform: none;
+}
+
+/*
+ * Charts are NOT handled here, deliberately.
+ *
+ * Time runs oldest-to-newest in every locale, so `Sparkline` and the daily
+ * usage bars in `billing/tabs/OverviewTab.js` pin `direction: ltr` inline, at
+ * the element that draws them. A rule here would be a second mechanism for the
+ * same job and the two would eventually disagree — and inline cannot be
+ * defeated by CSS load order, which for a chart that would otherwise render
+ * backwards is worth more than the tidiness.
+ */

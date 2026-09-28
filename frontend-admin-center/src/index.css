@@ -1,0 +1,487 @@
+/**
+ * Admin center global styles.
+ *
+ * Ported from the customer center's index.css so both apps share one motion
+ * and depth vocabulary. Three deliberate differences:
+ *
+ *   1. No `@tailwind` directives. Tailwind is installed in the customer center
+ *      but not one utility class is used there — importing that weight here
+ *      would repeat the mistake. antd v6's own reset covers what preflight did.
+ *   2. The table treatment is the GLOBAL DEFAULT, not an opt-in `.ledger-table`
+ *      class. Admin has 27 hand-rolled tables; styling `.ant-table` directly
+ *      restyles all of them without editing a single page. `.ledger-table` is
+ *      kept as a no-op alias so components copied from the customer center
+ *      still work.
+ *   3. The customer center's deploy-journey animations are omitted — that
+ *      wizard doesn't exist here.
+ */
+
+body {
+  margin: 0;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Roboto', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* The ground has to be painted here, not only by <Layout>. The 404 route
+     sits OUTSIDE AppLayout (App.js `path="*"`), so in dark mode it was
+     rendering dark text on the browser's default white body. Anything that
+     ever renders outside the layout inherits the right ground from here. */
+  background: #F4F4F5;
+  color: #18181B;
+}
+
+html.dark body {
+  background: #0A0A0A;
+  color: #EDEDED;
+}
+
+code {
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
+}
+
+/* antd's Sider wraps its children in `.ant-layout-sider-children`, a plain
+ * block div — the `display:flex; flex-direction:column` applied to the
+ * Sider itself has no effect on its own children because of that extra
+ * wrapper, so a `flex:1` nav section never actually grows to push the
+ * bottom user card down to the true bottom of the sidebar. Making the
+ * wrapper itself a flex column fixes that at the source. */
+.ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ── Sidebar nav — dark mode ─────────────────────────────────────────────
+ * antd's Menu `theme="dark"` computes its own selected/hover fill from the
+ * dark algorithm, which comes out as a solid, heavy block — not the soft
+ * tinted pill the light theme gets. Overridden directly so the active item
+ * stays a quiet tint instead of reading like a filled button.
+ */
+.dark .ant-menu-dark .ant-menu-item-selected {
+  background: rgba(94, 124, 247, 0.16) !important;
+}
+.dark .ant-menu-dark .ant-menu-item-selected,
+.dark .ant-menu-dark .ant-menu-item-selected .anticon,
+.dark .ant-menu-dark .ant-menu-item-selected a {
+  color: #A9BBFF !important;
+}
+.dark .ant-menu-dark .ant-menu-item:not(.ant-menu-item-selected):hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #EDEDED !important;
+}
+
+/* ── Collapsed-rail flyout ──────────────────────────────────────────────
+ * When the sidebar is collapsed to icons only, hovering a section icon opens
+ * antd's own flyout popup listing that section's pages. By default it paints
+ * itself with `colorBgElevated`, a distinctly lighter panel than the sidebar
+ * it hangs off — the same barely-there wash used for an open section
+ * (AppSider.js's `renderSection`) is applied here too, layered over the
+ * popup's own surface, so the two mechanisms read as one design instead of
+ * two different treatments for the same idea. */
+.ant-menu-submenu-popup > .ant-menu {
+  background: linear-gradient(rgba(17, 24, 54, 0.015), rgba(17, 24, 54, 0.015)), #FFFFFF !important;
+}
+.dark .ant-menu-submenu-popup > .ant-menu {
+  background: linear-gradient(rgba(255, 255, 255, 0.012), rgba(255, 255, 255, 0.012)), #0F0F0F !important;
+}
+
+/* ── Typography ──────────────────────────────────────────────────────────
+ * One family throughout — headings are simply heavier and tighter-tracked
+ * than body text, so there is no second face to clash with the UI.
+ */
+.ant-typography-title,
+h1.ant-typography, h2.ant-typography, h3.ant-typography, h4.ant-typography {
+  /* 700, not 800. At the customer center's 24–30px display sizes the extra
+     weight read as confident; at this console's 16–20px it just reads as
+     heavy, and every heading started competing with the data under it. */
+  font-weight: 700 !important;
+  letter-spacing: -0.02em;
+}
+.ant-statistic-content {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Table treatment ─────────────────────────────────────────────────────
+ * Plain-case header, no header fill, hairline rows and a soft indigo
+ * hover wash — matches the light, airy card surfaces rather than antd's
+ * default grey banding.
+ *
+ * Applied to `.ant-table` globally rather than behind a class: every one of
+ * this app's 27 tables is hand-rolled, and opting each one in individually
+ * would mean 27 edits for a purely visual change. `.ledger-table` is retained
+ * as an alias so code lifted from the customer center keeps working.
+ *
+ * ADMIN-ONLY DIVERGENCE from the customer center's table header: that app
+ * uses a small uppercase, letter-spaced header (`font-size:11px; text-
+ * transform:uppercase`), which reads as a consumer SaaS dashboard. An admin
+ * back-office reads as more purposeful with a plain-case header instead —
+ * closer to the density-first admin tools (e.g. TailAdmin) this console is
+ * modeled on. This is a deliberate, requested departure from the otherwise
+ * byte-identical design system, scoped to this one rule.
+ *
+ * Cell padding and font size come from the Table component tokens in index.js
+ * (`cellPaddingBlock/Inline`), not from here — see the density note there.
+ */
+.ant-table-thead > tr > th {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #71717A;
+  background: transparent !important;
+  border-bottom: 1px solid #E4E4E7;
+  /* A header must never wrap. When it does, a narrow column breaks a word
+     across lines ("Acti / Reques / ons") and the row grows to fit it — the
+     column header is a label, so it sets the column's real minimum width. */
+  white-space: nowrap;
+}
+.dark .ant-table-thead > tr > th {
+  color: #A1A1AA;
+  border-bottom-color: #272727;
+}
+
+/* antd draws a vertical hairline between header cells; with a transparent
+   header fill it reads as a stray tick rather than a divider. */
+.ant-table-thead > tr > th::before {
+  display: none !important;
+}
+
+/* Cells do not wrap either.
+ *
+ * This is the single biggest thing separating a dense admin table from a
+ * roomy consumer one. Left to wrap, one long email ("deployer@aiocean-test
+ * .com") turned a 36px row into a 70px row, and because it only happened on
+ * *some* rows the whole table lost its rhythm — the eye can't scan a column
+ * of values when every row is a different height. Clipping instead of
+ * wrapping keeps every row the same height and keeps the row count per screen
+ * predictable, which is what an operator is actually scanning for.
+ *
+ * A cell that stacks two lines on purpose (a name over its subtitle) still
+ * does — those are separate block children, and only their own wrapping is
+ * suppressed. `.wrap-cell` opts an individual column back into wrapping for
+ * genuine prose. */
+.ant-table-tbody > tr > td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ant-table-tbody > tr > td.wrap-cell,
+.ant-table-tbody > tr > td .wrap-cell {
+  white-space: normal;
+  overflow: visible;
+}
+/* A stacked cell (name over subtitle) is a vertical Space, so each line is its
+   own block child — the td's own ellipsis can't reach them. Give the lines
+   their own, or a long email clips mid-character with no sign it was cut. */
+.ant-table-tbody > tr > td .ant-space-vertical > .ant-space-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: #F6F6F7 !important;
+}
+.dark .ant-table-tbody > tr:hover > td {
+  background: rgba(255, 255, 255, 0.035) !important;
+}
+
+/* The horizontal scrollbar a wide table still needs, made visible rather than
+   an OS-hidden overlay — a table that scrolls sideways with no visible
+   affordance just reads as "the columns are cut off". */
+.ant-table-body::-webkit-scrollbar,
+.ant-table-content::-webkit-scrollbar {
+  height: 8px;
+}
+.ant-table-body::-webkit-scrollbar-thumb,
+.ant-table-content::-webkit-scrollbar-thumb {
+  background: #D4D4D8;
+  border-radius: 4px;
+}
+.dark .ant-table-body::-webkit-scrollbar-thumb,
+.dark .ant-table-content::-webkit-scrollbar-thumb {
+  background: #3F3F46;
+}
+
+/* ── Forms ───────────────────────────────────────────────────────────────
+ * Inside a FormSection the column is already capped, but a number or a date
+ * still has no business filling it: "Free Trial Days" as a 570px-wide box
+ * tells the reader to expect a paragraph. Sizing the control to the size of
+ * the value it holds is the whole point of a settings form.
+ *
+ * Scoped to `.form-section` so a number input deliberately laid out wide in a
+ * grid elsewhere (component pricing rows, plan builders) is untouched. */
+.form-section .ant-input-number,
+.form-section .ant-picker:not(.ant-picker-range) {
+  max-width: 190px;
+  width: 100%;
+}
+/* A single-choice select holds one short label, so it gets a control-sized
+   box too. Multi-selects are excluded — those genuinely grow with their tags. */
+.form-section .ant-select-single {
+  max-width: 320px;
+  width: 100%;
+}
+.form-section .ant-form-item:last-child {
+  margin-bottom: 0;
+}
+
+/* A Form.Item inside a Space loses its bottom margin, so two stacked rows of
+ * settings fields end up touching: the first row's help text sits directly
+ * against the second row's label with no gap at all. On the Billing tab that
+ * put "Attempt to auto-charge once debt reaches" hard against "Blocks PAYG once
+ * a customer's debt exceeds this", and the two rows read as one jumbled block.
+ *
+ * Measured before this rule: every gap between consecutive field rows was 0px.
+ *
+ * The spacing goes on the Space, not on the Form.Item inside it. Putting it on
+ * the item looks right — the computed margin really does become 16px — and
+ * still changes nothing on screen, because `.ant-space-item` carries no padding
+ * or border, so the child's bottom margin collapses straight through it and out
+ * of the row. Measured that way the gap stayed at exactly 0px.
+ *
+ * 16px rather than antd's default 24px: the admin center is meant to read
+ * denser than the customer center, just not so dense that a label sits on
+ * someone else's hint. */
+.ant-form .ant-space {
+  margin-bottom: 16px;
+}
+
+/* Borderless header search — sits on a soft filled pill rather than an
+ * outlined box, so the top bar stays visually quiet. */
+.header-search,
+.header-search:hover,
+.header-search:focus-within {
+  border: none !important;
+  box-shadow: none !important;
+}
+.header-search input {
+  background: transparent !important;
+}
+
+/* ── Gradient CTA ────────────────────────────────────────────────────────
+ * Reserved for the single most important action on a screen. Kept as a
+ * class so the gradient is defined once, and so the hover state can lift
+ * without re-declaring the fill.
+ */
+.btn-gradient,
+.btn-gradient:hover,
+.btn-gradient:focus {
+  background: linear-gradient(135deg, #6EA8FE 0%, #4F6BED 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 4px 14px rgba(79, 107, 237, 0.32);
+}
+.btn-gradient:hover {
+  box-shadow: 0 6px 20px rgba(79, 107, 237, 0.42);
+  transform: translateY(-1px);
+}
+.btn-gradient {
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+/* ── Motion & depth system ──────────────────────────────────────────────
+ * A handful of shared classes so "lift on hover" and "status pulse" are
+ * defined once instead of re-implemented per page with onMouseEnter state.
+ * Respects prefers-reduced-motion throughout.
+ */
+.card-hover {
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+}
+
+.spec-card:hover {
+  border-color: #4F6BED !important;
+}
+.dark .spec-card:hover {
+  border-color: #7089F5 !important;
+}
+
+.row-hover {
+  transition: background-color 120ms ease;
+}
+.row-hover:hover {
+  background: #F6F6F7;
+}
+.dark .row-hover:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.avatar-interactive {
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.avatar-interactive:hover {
+  transform: scale(1.06);
+}
+
+.fade-in {
+  animation: aio-fade-in 220ms ease both;
+}
+
+@keyframes aio-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.status-dot {
+  position: relative;
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  animation: aio-pulse 2s ease-out infinite;
+}
+
+@keyframes aio-pulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* Skeleton shimmer — see components/Skeletons.js */
+.aio-skeleton {
+  background: linear-gradient(90deg, var(--aio-sk-base) 25%, var(--aio-sk-shine) 37%, var(--aio-sk-base) 63%);
+  background-size: 400% 100%;
+  animation: aio-shimmer 1.6s ease infinite;
+  border-radius: 8px;
+}
+:root { --aio-sk-base: #E8E8EB; --aio-sk-shine: #F5F5F6; }
+.dark-skeleton { --aio-sk-base: #1E1E1E; --aio-sk-shine: #2C2C2C; }
+
+@keyframes aio-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ── Print ───────────────────────────────────────────────────────────────
+ * Invoices, receivables and customer records get printed or saved as PDF, so
+ * the app chrome around them has to drop away and leave the card on a plain
+ * white page.
+ */
+@media print {
+  .ant-layout-sider,
+  .ant-layout-header,
+  .no-print {
+    display: none !important;
+  }
+  .ant-layout,
+  .ant-layout-content {
+    margin: 0 !important;
+    background: #fff !important;
+  }
+  .ant-card {
+    border: none !important;
+    box-shadow: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-hover, .card-hover:hover, .fade-in, .status-dot.pulse::after, .aio-skeleton {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+  /* Suppressing the animation must not suppress the content with it — .fade-in
+     animates from opacity 0, so it needs it restored explicitly. */
+  .fade-in {
+    opacity: 1 !important;
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Data tables must scroll inside themselves, never push the page sideways.
+
+   antd gives a <Table scroll={{x}}> an overflow-x container, but a flex or
+   grid child defaults to `min-width: auto`, which refuses to shrink below its
+   content — so the container never actually became narrower than the table and
+   the whole document scrolled instead. Letting the wrapper shrink is what makes
+   the table's own scrollbar engage.
+   ───────────────────────────────────────────────────────────────────────── */
+.ant-table-wrapper {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ant-table-wrapper .ant-table-content {
+  overflow-x: auto;
+}
+
+/* Same reasoning for the cards and columns tables sit in. */
+.ant-card,
+.ant-col,
+.ant-tabs-tabpane {
+  min-width: 0;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Phone widths: horizontal control rows wrap or scroll instead of pushing
+   the page sideways.
+
+   Toolbars (`Space`), the segmented tab switcher and wide primary buttons
+   were each laid out on one line at any width, so on a 375px screen they hung
+   off the right edge and took the whole document with them.
+   ───────────────────────────────────────────────────────────────────────── */
+@media (max-width: 575px) {
+  /* Button/filter toolbars stack rather than run off the edge */
+  .ant-space-horizontal {
+    flex-wrap: wrap;
+  }
+
+  /* The segmented control scrolls within itself, like a tab strip should */
+  .ant-segmented {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  /* A button captioned "Save Customer Settings" cannot be 200px on a phone */
+  .ant-btn {
+    max-width: 100%;
+  }
+  .ant-btn > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /*
+     Pinned columns become ordinary ones on a phone.
+
+     `rowActions` marks the actions column `fixed: 'right'`, which antd
+     implements as a sticky cell floating above the scrolling table. On a
+     375px screen that cell sits on top of the columns underneath it — the
+     customers table rendered its "Actions" header overlapping "Status".
+     There isn't room to pin anything at this width, so let them scroll.
+  */
+  /* antd names these -start/-end in current versions and -left/-right in
+     older ones; cover both so this keeps working across an upgrade. */
+  .ant-table-cell-fix,
+  .ant-table-cell-fix-start,
+  .ant-table-cell-fix-end,
+  .ant-table-cell-fix-left,
+  .ant-table-cell-fix-right {
+    position: static !important;
+    inset-inline-end: auto !important;
+    inset-inline-start: auto !important;
+  }
+  .ant-table-cell-fix-end-shadow,
+  .ant-table-cell-fix-start-shadow,
+  .ant-table-cell-fix-left-last::after,
+  .ant-table-cell-fix-right-first::after {
+    box-shadow: none !important;
+  }
+}

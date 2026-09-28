@@ -1,0 +1,60 @@
+{
+    "name": "platform-backend",
+    "version": "1.0.0",
+    "description": "AI model hosting and deployment platform - Backend API",
+    "main": "server.js",
+    "scripts": {
+        "start": "node src/server.js",
+        "dev": "nodemon src/server.js",
+        "test": "node --test src/**/__tests__/*.test.js",
+        "seed": "node src/scripts/seed/seedSuperAdmin.js",
+        "seed:usecases": "node src/scripts/seed/seedUseCaseTags.js",
+        "seed:components": "node src/scripts/seed/seedResourceComponents.js",
+        "seed:catalog": "node src/scripts/seed/seedCatalog.js",
+        "seed:questionnaire": "node src/scripts/seed/seedQuestionnaire.js",
+        "seed:journey": "node src/scripts/seed/seedDeploymentJourney.js",
+        "seed:deploy": "npm run seed:usecases && npm run seed:components && npm run seed:catalog && npm run seed:questionnaire && npm run seed:journey && npm run seed:policy && npm run seed:marketing",
+        "seed:marketing": "node src/scripts/seed/seedMarketingSite.js",
+        "seed:blog": "node src/scripts/seed/seedBlogPosts.js",
+        "seed:policy": "node src/scripts/seed/seedRecommendationPolicy.js",
+        "test:api": "node src/scripts/testSuite.js",
+        "lint": "eslint src",
+        "lint:fix": "eslint src --fix",
+        "test:engine": "node --test src/services/recommendation/__tests__/",
+        "db:migrate": "prisma migrate deploy",
+        "db:migrate:dev": "prisma migrate dev",
+        "db:generate": "prisma generate",
+        "db:studio": "prisma studio"
+    },
+    "keywords": [
+        "ai",
+        "hosting",
+        "deployment",
+        "gpu",
+        "platform"
+    ],
+    "author": "Platform Team",
+    "license": "ISC",
+    "dependencies": {
+        "@prisma/adapter-pg": "^7.10.0",
+        "@prisma/client": "^7.10.0",
+        "bcryptjs": "^2.4.3",
+        "cors": "^2.8.6",
+        "dotenv": "^16.6.1",
+        "express": "^4.22.1",
+        "google-auth-library": "^10.5.0",
+        "jsonwebtoken": "^9.0.3",
+        "multer": "^2.0.2",
+        "node-cron": "^4.2.1",
+        "nodemailer": "^8.0.1",
+        "pdfkit": "^0.17.2",
+        "pg": "^8.23.0",
+        "prisma": "^7.10.0",
+        "stripe": "^20.3.1",
+        "zod": "^4.5.4"
+    },
+    "devDependencies": {
+        "eslint": "^9.39.5",
+        "nodemon": "^3.0.1"
+    }
+}

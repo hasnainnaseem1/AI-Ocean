@@ -1,0 +1,175 @@
+-- Repair polymorphic references written before the id migration.
+--
+-- `credit_transactions.reference_id` and `activity_logs.target_id` are plain
+-- strings with no foreign key, so nothing forced them to be updated when every
+-- table's public id changed from a 24-hex string to its UUID primary key.
+-- Rows written before that change still point at the old id.
+--
+-- That is not cosmetic: the customer's "Spend by deployment" breakdown resolves
+-- `reference_id` against the deployment's id, so every historical charge showed
+-- up as "Other usage — not linked to a deployment". On the account this was
+-- found on, that was 95% of the month's bill.
+--
+-- The mapping is written out as literal values rather than read from anywhere,
+-- because the column it came from no longer exists. It was recovered from
+-- backups/platform_db_before_dropping_legacy_ids_20260909_213637.sql.
+--
+-- Safe to re-run: rows already holding a UUID match nothing here.
+--
+-- Written as two self-contained statements rather than a temp table: Prisma
+-- applies each statement in its own session, so a TEMP TABLE created by one
+-- is already gone by the next.
+
+UPDATE credit_transactions t
+   SET reference_id = m.new_id
+  FROM (VALUES
+  ('6a8c838a995ccf11354e9569', '8dd40673-0ba5-46db-8deb-0ab0c07da10c'),
+  ('6a8c8882995ccf11354ea217', '608531bc-2547-4668-ae94-4047eca43b8c'),
+  ('6a8dea9ec8b7327680cc36bf', '7c772c57-8463-4363-83ba-2198f29e8609'),
+  ('6a8debd304b4c0aa2e34bafa', '4d23e266-8b27-4e82-8531-4406037a3d77'),
+  ('6a99ae5ad5b9aa6b90eb50da', '2ece3906-9729-4ff4-a50c-3a1dc6d61274'),
+  ('6a99ae63d5b9aa6b90eb50f6', '430e632d-c388-4835-8b71-5cf033573ea0'),
+  ('6a8c747d995ccf11354e929f', 'c61ee8d6-1cda-48a6-a394-e1fba078bcdd'),
+  ('6a8ded8204b4c0aa2e34c8c9', '70d011e4-4a94-41f8-8b8f-6239a2e23e4c'),
+  ('6a9e8636df822f6fa315b333', 'b40e8dea-00cf-4f55-9efc-a97c5308702f'),
+  ('69b44cc543f820d1c3abe093', '37ef3f82-aa64-4cca-a40c-5507972237e3'),
+  ('6a8c878d995ccf11354e9d85', 'af639842-c23c-4c10-9127-9d4fc8f5c6f9'),
+  ('6991d534d7e952b393743cd3', '8ac28ef5-849c-4af1-b47d-de3ff2694134'),
+  ('6991df5e8c9d33640999dae8', '1b2abe5c-94ad-4b13-a4da-6b214784e75a'),
+  ('6991a02af6a77dc7fc2a8b46', '932bd71b-3d11-42bd-be78-e66c8a7de72c'),
+  ('69a5d8a2f4a26c0e0793faf7', 'fe76eae8-f333-4cda-83d9-56ef933b4cb5'),
+  ('6a8c744e995ccf11354e9180', '21a9e868-28d9-4fe2-93ff-87df494235a1'),
+  ('69889bb86120321c3991085a', 'b8eb6efd-a8d1-4dc0-843c-670e18374c5d'),
+  ('6a8c73d23c7314a23f9cd9a2', '194417d6-ba61-4ae2-aff0-e2d54be00415'),
+  ('6a8c73d23c7314a23f9cd9a6', 'e450d68c-f115-4763-b9d8-d700743be578'),
+  ('6a8c878d995ccf11354e9d9b', 'efecaef9-304d-4588-afa1-beb8d840f07f'),
+  ('6a8c744e995ccf11354e9196', 'bdcd727a-6eba-4f13-9a7e-9764e8630ce1'),
+  ('699503512c5500902708a2e2', 'a2e7a4b9-f7da-4f55-bd3e-55f9fc470238'),
+  ('699503512c5500902708a3ca', '03e6b5b9-515c-47e7-9aba-9e4b841ea238'),
+  ('6995036a2c5500902708a3f0', '7a94de6d-8bca-4967-ae62-26a7b5d4bea0'),
+  ('6995048753a9ac50b2bef108', '028fb66a-ad73-4561-a2ef-0f0f12f943ac'),
+  ('6995048753a9ac50b2bef1f7', 'd02b0097-db23-4ba2-afec-aaed74668f38'),
+  ('699504d753a9ac50b2bef2bd', 'bc175db5-3588-4a7d-b6d2-120daa3f745c'),
+  ('699504d753a9ac50b2bef3ac', 'eb410478-7c7c-48d3-9081-522cf57da506'),
+  ('6a8c73dea610f10a3e5118f9', '9591c917-6569-4a75-bde9-db291c8c1d9c'),
+  ('6a8c73dea610f10a3e5118fc', 'a1112517-815d-4286-8494-e93d9e4983b6'),
+  ('6a8c73dea610f10a3e5118ff', '5d0769a0-1c73-4811-a4d1-f67d046fbb93'),
+  ('6a8c73dea610f10a3e511902', '685ab528-2ccb-4d76-af52-38a10e6a8a21'),
+  ('6a8c73dea610f10a3e511905', 'd37a3075-36c6-48ad-bee9-e124f7d843c4'),
+  ('6a8c73dea610f10a3e511908', 'be6038d9-e4ae-4cf1-8d8c-e1f079e367dd'),
+  ('6a8c73dea610f10a3e51190c', '6f113d60-df70-4452-a33b-8d3c93c0622a'),
+  ('6a8c73dea610f10a3e51190f', '5caa4eaa-eca4-4e67-b821-5c4baac918f9'),
+  ('6a8c73dea610f10a3e5118f4', '367d94ea-1ea9-427b-9732-fba115855b39'),
+  ('6a8c73dea610f10a3e5118eb', '2755cb92-8ff2-46f6-9afe-42d87233dde7'),
+  ('6a8c73dea610f10a3e5118f1', '2d4d7f4c-797b-4338-9371-e410ac03843f'),
+  ('6a8fdfaea747995f4ae5f592', '1188d9c6-c225-4e62-bcae-6e02b465be1e'),
+  ('6a8fdfaea747995f4ae5f596', 'b1b25842-dd49-4057-a745-3ba0559f7d9c'),
+  ('6a8c73dea610f10a3e5118e2', '41ea0cb4-57c1-4a17-a9cf-bef4dcb21679'),
+  ('6a8c73dea610f10a3e5118e8', '62171cb0-c5ac-4f20-9b41-ed738f89def8'),
+  ('6a8c73dea610f10a3e5118ee', 'e248673b-267c-4bea-8be6-6cdfb778483c'),
+  ('6a8c73dea610f10a3e5118d9', '6aaef5b4-f7be-4cfb-9785-519e45a5986b'),
+  ('6a8fdfa360caa00ea618cb87', '799b5dd3-0340-4547-a885-cbadab38a82e'),
+  ('6a8fdfa360caa00ea618cb8a', 'e79acab6-ba1c-4a12-b071-79cecbd70bd5'),
+  ('6a8fdfa360caa00ea618cb8e', 'c9e61750-aa09-4423-bf89-91380156be93'),
+  ('6a8fdfa360caa00ea618cb92', 'be9afe68-f4d9-4e36-9a1a-26f5d479bdc6'),
+  ('6a8fdfa360caa00ea618cb95', '6db7fc74-be85-4916-99e1-e28cd4d37067'),
+  ('6a8fdfa360caa00ea618cb98', 'a80a71fa-4ea1-48b5-8270-1279c57015b1'),
+  ('6a8fdfa360caa00ea618cb9e', '263c204c-3819-4ffa-9329-b13b24913465'),
+  ('6a8fdfa360caa00ea618cba1', '27b3aedb-72db-48e9-a793-ce9fc8ba3797'),
+  ('6a8fdfa360caa00ea618cba4', '1c12143a-eea3-4abb-aa42-10ddfbc705be'),
+  ('6a8fdfa360caa00ea618cba7', '8265093c-3ce2-477c-acf9-d47fee943d81'),
+  ('6a8fdfa360caa00ea618cb9b', '6858b207-f2be-4e04-9c17-ae267928f202'),
+  ('6a8c73de7cdbc428ae8f0e8d', 'ec3d3f4f-cad7-42b9-a725-f315c2889168'),
+  ('6a8c73de7cdbc428ae8f0e72', '0a5e5a7d-6722-4dd6-80ac-418f29036285'),
+  ('6a8c73de7cdbc428ae8f0e7f', 'e18c5c39-6eef-48b2-895d-55bfad5a6c12'),
+  ('6a8c73de7cdbc428ae8f0e86', '293ed0e2-314b-4e1e-9be3-300d4e429cc6'),
+  ('6a8c73de7cdbc428ae8f0e8a', '818fad95-67eb-486c-b452-3456ea02b47b'),
+  ('6a8c73de7cdbc428ae8f0e99', '1c4f7074-9e50-4e75-9dc2-9f6197aabf7e'),
+  ('6a8c73de7cdbc428ae8f0e9f', 'dc95c760-0799-458c-bbd4-dbc2e8b0890a'),
+  ('6a8c73de7cdbc428ae8f0ea2', '4ca0bdb7-0bd2-4ed4-af09-9378272633cf'),
+  ('6a8c73de7cdbc428ae8f0e90', '8d63b791-9f35-4619-b69b-ca6fe6268fec'),
+  ('6a8c73de7cdbc428ae8f0e93', '8f0b5fe6-cb96-4b21-a501-71fc97edbc99'),
+  ('6a8c73de7cdbc428ae8f0e96', '7590aa4d-7b88-42cf-a02c-508610f4a60c'),
+  ('6a8c73de7cdbc428ae8f0e6a', '8ec9ce16-43b3-4235-a1ab-4c9007a8d414'),
+  ('6a8c73de7cdbc428ae8f0e83', '834625d5-9315-4b51-900d-ee097463e19a'),
+  ('6a8c73de7cdbc428ae8f0e9c', 'b59d46df-148e-415d-a5d7-62d407c10b39'),
+  ('6a8ef1670a6b401cd59d3b9f', '16424e3b-4635-4ed0-a8cb-3bb60d941c8d')
+  ) AS m(old_id, new_id)
+ WHERE t.reference_id = m.old_id;
+
+UPDATE activity_logs a
+   SET target_id = m.new_id
+  FROM (VALUES
+  ('6a8c838a995ccf11354e9569', '8dd40673-0ba5-46db-8deb-0ab0c07da10c'),
+  ('6a8c8882995ccf11354ea217', '608531bc-2547-4668-ae94-4047eca43b8c'),
+  ('6a8dea9ec8b7327680cc36bf', '7c772c57-8463-4363-83ba-2198f29e8609'),
+  ('6a8debd304b4c0aa2e34bafa', '4d23e266-8b27-4e82-8531-4406037a3d77'),
+  ('6a99ae5ad5b9aa6b90eb50da', '2ece3906-9729-4ff4-a50c-3a1dc6d61274'),
+  ('6a99ae63d5b9aa6b90eb50f6', '430e632d-c388-4835-8b71-5cf033573ea0'),
+  ('6a8c747d995ccf11354e929f', 'c61ee8d6-1cda-48a6-a394-e1fba078bcdd'),
+  ('6a8ded8204b4c0aa2e34c8c9', '70d011e4-4a94-41f8-8b8f-6239a2e23e4c'),
+  ('6a9e8636df822f6fa315b333', 'b40e8dea-00cf-4f55-9efc-a97c5308702f'),
+  ('69b44cc543f820d1c3abe093', '37ef3f82-aa64-4cca-a40c-5507972237e3'),
+  ('6a8c878d995ccf11354e9d85', 'af639842-c23c-4c10-9127-9d4fc8f5c6f9'),
+  ('6991d534d7e952b393743cd3', '8ac28ef5-849c-4af1-b47d-de3ff2694134'),
+  ('6991df5e8c9d33640999dae8', '1b2abe5c-94ad-4b13-a4da-6b214784e75a'),
+  ('6991a02af6a77dc7fc2a8b46', '932bd71b-3d11-42bd-be78-e66c8a7de72c'),
+  ('69a5d8a2f4a26c0e0793faf7', 'fe76eae8-f333-4cda-83d9-56ef933b4cb5'),
+  ('6a8c744e995ccf11354e9180', '21a9e868-28d9-4fe2-93ff-87df494235a1'),
+  ('69889bb86120321c3991085a', 'b8eb6efd-a8d1-4dc0-843c-670e18374c5d'),
+  ('6a8c73d23c7314a23f9cd9a2', '194417d6-ba61-4ae2-aff0-e2d54be00415'),
+  ('6a8c73d23c7314a23f9cd9a6', 'e450d68c-f115-4763-b9d8-d700743be578'),
+  ('6a8c878d995ccf11354e9d9b', 'efecaef9-304d-4588-afa1-beb8d840f07f'),
+  ('6a8c744e995ccf11354e9196', 'bdcd727a-6eba-4f13-9a7e-9764e8630ce1'),
+  ('699503512c5500902708a2e2', 'a2e7a4b9-f7da-4f55-bd3e-55f9fc470238'),
+  ('699503512c5500902708a3ca', '03e6b5b9-515c-47e7-9aba-9e4b841ea238'),
+  ('6995036a2c5500902708a3f0', '7a94de6d-8bca-4967-ae62-26a7b5d4bea0'),
+  ('6995048753a9ac50b2bef108', '028fb66a-ad73-4561-a2ef-0f0f12f943ac'),
+  ('6995048753a9ac50b2bef1f7', 'd02b0097-db23-4ba2-afec-aaed74668f38'),
+  ('699504d753a9ac50b2bef2bd', 'bc175db5-3588-4a7d-b6d2-120daa3f745c'),
+  ('699504d753a9ac50b2bef3ac', 'eb410478-7c7c-48d3-9081-522cf57da506'),
+  ('6a8c73dea610f10a3e5118f9', '9591c917-6569-4a75-bde9-db291c8c1d9c'),
+  ('6a8c73dea610f10a3e5118fc', 'a1112517-815d-4286-8494-e93d9e4983b6'),
+  ('6a8c73dea610f10a3e5118ff', '5d0769a0-1c73-4811-a4d1-f67d046fbb93'),
+  ('6a8c73dea610f10a3e511902', '685ab528-2ccb-4d76-af52-38a10e6a8a21'),
+  ('6a8c73dea610f10a3e511905', 'd37a3075-36c6-48ad-bee9-e124f7d843c4'),
+  ('6a8c73dea610f10a3e511908', 'be6038d9-e4ae-4cf1-8d8c-e1f079e367dd'),
+  ('6a8c73dea610f10a3e51190c', '6f113d60-df70-4452-a33b-8d3c93c0622a'),
+  ('6a8c73dea610f10a3e51190f', '5caa4eaa-eca4-4e67-b821-5c4baac918f9'),
+  ('6a8c73dea610f10a3e5118f4', '367d94ea-1ea9-427b-9732-fba115855b39'),
+  ('6a8c73dea610f10a3e5118eb', '2755cb92-8ff2-46f6-9afe-42d87233dde7'),
+  ('6a8c73dea610f10a3e5118f1', '2d4d7f4c-797b-4338-9371-e410ac03843f'),
+  ('6a8fdfaea747995f4ae5f592', '1188d9c6-c225-4e62-bcae-6e02b465be1e'),
+  ('6a8fdfaea747995f4ae5f596', 'b1b25842-dd49-4057-a745-3ba0559f7d9c'),
+  ('6a8c73dea610f10a3e5118e2', '41ea0cb4-57c1-4a17-a9cf-bef4dcb21679'),
+  ('6a8c73dea610f10a3e5118e8', '62171cb0-c5ac-4f20-9b41-ed738f89def8'),
+  ('6a8c73dea610f10a3e5118ee', 'e248673b-267c-4bea-8be6-6cdfb778483c'),
+  ('6a8c73dea610f10a3e5118d9', '6aaef5b4-f7be-4cfb-9785-519e45a5986b'),
+  ('6a8fdfa360caa00ea618cb87', '799b5dd3-0340-4547-a885-cbadab38a82e'),
+  ('6a8fdfa360caa00ea618cb8a', 'e79acab6-ba1c-4a12-b071-79cecbd70bd5'),
+  ('6a8fdfa360caa00ea618cb8e', 'c9e61750-aa09-4423-bf89-91380156be93'),
+  ('6a8fdfa360caa00ea618cb92', 'be9afe68-f4d9-4e36-9a1a-26f5d479bdc6'),
+  ('6a8fdfa360caa00ea618cb95', '6db7fc74-be85-4916-99e1-e28cd4d37067'),
+  ('6a8fdfa360caa00ea618cb98', 'a80a71fa-4ea1-48b5-8270-1279c57015b1'),
+  ('6a8fdfa360caa00ea618cb9e', '263c204c-3819-4ffa-9329-b13b24913465'),
+  ('6a8fdfa360caa00ea618cba1', '27b3aedb-72db-48e9-a793-ce9fc8ba3797'),
+  ('6a8fdfa360caa00ea618cba4', '1c12143a-eea3-4abb-aa42-10ddfbc705be'),
+  ('6a8fdfa360caa00ea618cba7', '8265093c-3ce2-477c-acf9-d47fee943d81'),
+  ('6a8fdfa360caa00ea618cb9b', '6858b207-f2be-4e04-9c17-ae267928f202'),
+  ('6a8c73de7cdbc428ae8f0e8d', 'ec3d3f4f-cad7-42b9-a725-f315c2889168'),
+  ('6a8c73de7cdbc428ae8f0e72', '0a5e5a7d-6722-4dd6-80ac-418f29036285'),
+  ('6a8c73de7cdbc428ae8f0e7f', 'e18c5c39-6eef-48b2-895d-55bfad5a6c12'),
+  ('6a8c73de7cdbc428ae8f0e86', '293ed0e2-314b-4e1e-9be3-300d4e429cc6'),
+  ('6a8c73de7cdbc428ae8f0e8a', '818fad95-67eb-486c-b452-3456ea02b47b'),
+  ('6a8c73de7cdbc428ae8f0e99', '1c4f7074-9e50-4e75-9dc2-9f6197aabf7e'),
+  ('6a8c73de7cdbc428ae8f0e9f', 'dc95c760-0799-458c-bbd4-dbc2e8b0890a'),
+  ('6a8c73de7cdbc428ae8f0ea2', '4ca0bdb7-0bd2-4ed4-af09-9378272633cf'),
+  ('6a8c73de7cdbc428ae8f0e90', '8d63b791-9f35-4619-b69b-ca6fe6268fec'),
+  ('6a8c73de7cdbc428ae8f0e93', '8f0b5fe6-cb96-4b21-a501-71fc97edbc99'),
+  ('6a8c73de7cdbc428ae8f0e96', '7590aa4d-7b88-42cf-a02c-508610f4a60c'),
+  ('6a8c73de7cdbc428ae8f0e6a', '8ec9ce16-43b3-4235-a1ab-4c9007a8d414'),
+  ('6a8c73de7cdbc428ae8f0e83', '834625d5-9315-4b51-900d-ee097463e19a'),
+  ('6a8c73de7cdbc428ae8f0e9c', 'b59d46df-148e-415d-a5d7-62d407c10b39'),
+  ('6a8ef1670a6b401cd59d3b9f', '16424e3b-4635-4ed0-a8cb-3bb60d941c8d')
+  ) AS m(old_id, new_id)
+ WHERE a.target_id = m.old_id;

@@ -1,0 +1,17 @@
+-- Notifications remember WHICH message they are, not just what it said.
+--
+-- Until now a notification's only content was the English `title` and
+-- `message` frozen at write time. That is fine while the product is
+-- English-only, but a customer who switches to Urdu wants the whole bell in
+-- Urdu — last week's items included — and a frozen string can never follow.
+--
+-- `content_key` names the piece of copy (e.g. 'deployment.ready'), and the
+-- `metadata` column that already exists carries its placeholders. Together
+-- they let the message be rendered in the reader's own language at read time.
+--
+-- Nullable and unbackfilled on purpose: every row written before this
+-- migration keeps rendering from its stored English text, which is exactly
+-- what it always did. Recovering a structured key by parsing old English prose
+-- would mislabel some fraction of rows, and the only reward would be
+-- translating notifications nobody is going to read again.
+ALTER TABLE "notifications" ADD COLUMN "content_key" TEXT;

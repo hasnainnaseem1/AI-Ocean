@@ -1,0 +1,58 @@
+{
+  "list": {
+    "title": "支持工单",
+    "subtitle": "您的支持请求及其状态。",
+    "newTicket": "新建工单",
+    "total": "总计",
+    "totalCaption": "您提交的全部请求",
+    "awaiting": "待处理",
+    "awaitingCaption": "进行中或等待回复",
+    "solved": "已解决",
+    "solvedCaption": "已处理完成的请求",
+    "searchPlaceholder": "搜索工单…",
+    "empty": "您还没有提交过支持工单",
+    "ticketId": "工单编号",
+    "created": "创建时间",
+    "totalTickets": "工单\n总数",
+    "awaitingReply": "等待\n回复",
+    "solvedTickets": "已解决\n工单"
+  },
+  "form": {
+    "title": "新建支持工单",
+    "submit": "提交工单",
+    "subject": "主题",
+    "subjectPlaceholder": "例如：部署卡在配置阶段",
+    "subjectRequired": "请为工单填写一个简短的主题",
+    "category": "类别",
+    "message": "内容",
+    "messagePlaceholder": "请尽可能详细地描述问题…",
+    "messageRequired": "请说明您需要什么帮助"
+  },
+  "reply": {
+    "notFound": "找不到该工单",
+    "removed": "该工单可能已被删除。",
+    "back": "返回工单列表",
+    "noReplyYet": "支持团队尚未回复 — 他们的回复会显示在这里。",
+    "placeholder": "在此输入您的回复…",
+    "attachSoon": "附件功能即将推出",
+    "attach": "添加附件",
+    "send": "回复",
+    "supportTeam": "支持团队",
+    "details": "工单详情",
+    "customer": "客户",
+    "email": "邮箱",
+    "reopen": "重新打开工单",
+    "markResolved": "标为已解决"
+  },
+  "status": {
+    "open": "进行中",
+    "pending": "待处理",
+    "solved": "已解决"
+  },
+  "category": {
+    "general": "一般支持",
+    "billing": "账单",
+    "technical": "技术问题",
+    "deployment": "部署问题"
+  }
+}

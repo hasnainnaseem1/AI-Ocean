@@ -1,0 +1,39 @@
+{
+  "section": {
+    "infrastructure": "基础设施",
+    "support": "支持"
+  },
+  "item": {
+    "overview": "总览",
+    "models": "模型",
+    "machineTypes": "机器类型",
+    "deployments": "部署",
+    "supportTicket": "工单",
+    "myProfile": "我的资料",
+    "usageLimits": "用量限额",
+    "billing": "账单"
+  },
+  "badge": {
+    "new": "新"
+  },
+  "sidebar": {
+    "open": "展开侧边栏",
+    "close": "收起侧边栏"
+  },
+  "header": {
+    "searchPlaceholder": "搜索模型…",
+    "lightMode": "浅色模式",
+    "darkMode": "深色模式"
+  },
+  "account": {
+    "signOut": "退出登录"
+  },
+  "chat": {
+    "title": "支持对话",
+    "subtitle": "我们通常在几小时内回复",
+    "placeholder": "输入消息…",
+    "notConnected": "对话尚未接入",
+    "open": "支持对话",
+    "close": "关闭对话"
+  }
+}

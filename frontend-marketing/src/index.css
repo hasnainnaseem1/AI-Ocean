@@ -1,0 +1,148 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Re-triggered on every route change (see App.js) by remounting the element
+   this class is on — that is what makes going from one page to another read
+   as a deliberate transition instead of a hard cut. */
+@keyframes page-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-transition {
+  animation: page-fade-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition {
+    animation: none;
+  }
+}
+
+/* The top progress sweep — see RouteProgressBar.js */
+@keyframes route-progress {
+  0% { width: 0%; opacity: 1; }
+  70% { width: 85%; opacity: 1; }
+  100% { width: 100%; opacity: 0; }
+}
+
+.route-progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  background: var(--color-primary);
+  z-index: 100;
+  animation: route-progress 0.4s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-progress-bar {
+    display: none;
+  }
+}
+
+/* Product showcase tabs — see ShowcaseBlock.js */
+@keyframes showcase-progress {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+.showcase-progress-fill {
+  animation: showcase-progress linear forwards;
+}
+
+@keyframes showcase-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.showcase-fade {
+  animation: showcase-fade-in 0.35s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .showcase-progress-fill,
+  .showcase-fade {
+    animation: none;
+  }
+}
+
+/* Hero headline rotation — see BlockRenderer.js's HeroBlock */
+@keyframes hero-text-leave {
+  from { opacity: 1; transform: translateY(0); filter: blur(0); }
+  to { opacity: 0; transform: translateY(-14px); filter: blur(2px); }
+}
+
+@keyframes hero-text-enter {
+  from { opacity: 0; transform: translateY(18px); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+.hero-text-leaving {
+  animation: hero-text-leave 0.28s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.hero-text-entering {
+  animation: hero-text-enter 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-text-leaving,
+  .hero-text-entering {
+    animation: none;
+  }
+}
+
+/* Scroll-into-view reveal — see hooks/useReveal.js and components/Reveal.js */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+.reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Logo/model-name marquee — see BlockRenderer.js's LogosBlock. The track is
+   the item list duplicated once; translating exactly -50% lines the second
+   copy up where the first started, so the loop has no visible seam. */
+@keyframes marquee-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.marquee-track {
+  animation: marquee-scroll 34s linear infinite;
+}
+
+.marquee-track:hover {
+  animation-play-state: paused;
+}

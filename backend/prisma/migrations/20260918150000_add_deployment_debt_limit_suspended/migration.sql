@@ -1,0 +1,16 @@
+-- `auto_suspended_for_credit` means one specific thing: this deployment was
+-- paused because the prepaid wallet hit zero, and it is safe to resume the
+-- moment ANY top-up lands (deploymentService.resumeCreditSuspended runs on
+-- every payment webhook, unconditionally, for every deployment carrying that
+-- flag).
+--
+-- debtEnforcement (the account-level debt-limit/age-limit pause) was reusing
+-- that same flag, which meant a deployment paused for being over the
+-- platform's debt limit could be woken back up by a $1 top-up while the
+-- account was still thousands of dollars over the limit the admin set — the
+-- limit was enforced on the way down but not on the way back up.
+--
+-- This column gives that pause its own identity, with its own resume rule
+-- (resumeDebtLimitSuspended, gated on debtService.status(...).blocked being
+-- false again) instead of sharing one that was never meant for it.
+ALTER TABLE "deployments" ADD COLUMN "debt_limit_suspended" BOOLEAN NOT NULL DEFAULT false;

@@ -1,0 +1,39 @@
+{
+  "section": {
+    "infrastructure": "انفراسٹرکچر",
+    "support": "سپورٹ"
+  },
+  "item": {
+    "overview": "جائزہ",
+    "models": "ماڈلز",
+    "machineTypes": "مشین کی اقسام",
+    "deployments": "ڈیپلائمنٹس",
+    "supportTicket": "سپورٹ ٹکٹ",
+    "myProfile": "میری پروفائل",
+    "usageLimits": "استعمال کی حدود",
+    "billing": "بلنگ"
+  },
+  "badge": {
+    "new": "نیا"
+  },
+  "sidebar": {
+    "open": "سائیڈ بار کھولیں",
+    "close": "سائیڈ بار بند کریں"
+  },
+  "header": {
+    "searchPlaceholder": "ماڈلز تلاش کریں…",
+    "lightMode": "روشن موڈ",
+    "darkMode": "تاریک موڈ"
+  },
+  "account": {
+    "signOut": "سائن آؤٹ"
+  },
+  "chat": {
+    "title": "سپورٹ چیٹ",
+    "subtitle": "ہم عموماً چند گھنٹوں میں جواب دیتے ہیں",
+    "placeholder": "پیغام لکھیں…",
+    "notConnected": "چیٹ ابھی منسلک نہیں ہے",
+    "open": "سپورٹ چیٹ",
+    "close": "چیٹ بند کریں"
+  }
+}

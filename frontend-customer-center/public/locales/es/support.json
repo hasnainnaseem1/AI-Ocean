@@ -1,0 +1,58 @@
+{
+  "list": {
+    "title": "Tickets de soporte",
+    "subtitle": "Tus solicitudes de soporte y su estado.",
+    "newTicket": "Nuevo ticket",
+    "total": "Total",
+    "totalCaption": "Todas las solicitudes que has abierto",
+    "awaiting": "En espera",
+    "awaitingCaption": "Abiertas o pendientes de respuesta",
+    "solved": "Resueltos",
+    "solvedCaption": "Solicitudes ya resueltas",
+    "searchPlaceholder": "Buscar tickets…",
+    "empty": "Todavía no has abierto ningún ticket de soporte",
+    "ticketId": "ID del ticket",
+    "created": "Creado",
+    "totalTickets": "Tickets\ntotales",
+    "awaitingReply": "Esperando\nrespuesta",
+    "solvedTickets": "Tickets\nresueltos"
+  },
+  "form": {
+    "title": "Nuevo ticket de soporte",
+    "submit": "Enviar ticket",
+    "subject": "Asunto",
+    "subjectPlaceholder": "p. ej. El despliegue se ha quedado aprovisionando",
+    "subjectRequired": "Pon un asunto breve a tu ticket",
+    "category": "Categoría",
+    "message": "Mensaje",
+    "messagePlaceholder": "Describe el problema con todo el detalle que puedas…",
+    "messageRequired": "Describe en qué necesitas ayuda"
+  },
+  "reply": {
+    "notFound": "Ticket no encontrado",
+    "removed": "Puede que este ticket se haya eliminado.",
+    "back": "Volver a los tickets",
+    "noReplyYet": "Nuestro equipo de soporte aún no ha respondido: verás su respuesta aquí.",
+    "placeholder": "Escribe aquí tu respuesta…",
+    "attachSoon": "Los adjuntos llegarán pronto",
+    "attach": "Adjuntar",
+    "send": "Responder",
+    "supportTeam": "Equipo de soporte",
+    "details": "Detalles del ticket",
+    "customer": "Cliente",
+    "email": "Correo electrónico",
+    "reopen": "Reabrir ticket",
+    "markResolved": "Marcar como resuelto"
+  },
+  "status": {
+    "open": "Abierto",
+    "pending": "Pendiente",
+    "solved": "Resuelto"
+  },
+  "category": {
+    "general": "Soporte general",
+    "billing": "Facturación",
+    "technical": "Problema técnico",
+    "deployment": "Problema de despliegue"
+  }
+}

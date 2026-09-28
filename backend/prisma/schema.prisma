@@ -1,0 +1,2190 @@
+// ============================================================================
+// AI-Ocean backend — PostgreSQL schema (Prisma)
+//
+// Primary keys: every table gets a native Postgres `uuid` column, generated
+// by Postgres itself via `gen_random_uuid()`. On Postgres 13+ (this project
+// targets the latest stable, currently 18, per Docker container) that
+// function ships in core — no `pgcrypto` extension needed. Only pre-13
+// Postgres would require `CREATE EXTENSION pgcrypto`.
+//
+// That uuid is also the public id: it is what the API returns as `id` and what
+// every route accepts back. There is no second id column.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7: the connection URL no longer lives here — it's supplied to the
+// Migrate CLI via prisma.config.js and to PrismaClient at runtime via the
+// @prisma/adapter-pg driver adapter (see src/lib/prismaClient.js).
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// ==== Enums ====
+// ============================================================================
+
+// -- User --
+enum AccountType {
+  customer
+  admin
+}
+
+enum Role {
+  customer
+  super_admin
+  admin
+  moderator
+  viewer
+  custom
+}
+
+enum UserStatus {
+  pending_verification
+  active
+  suspended
+  banned
+  inactive
+}
+
+// -- Teams --
+// Who owns money on this platform. Every customer has exactly one `personal`
+// account (created at signup, 1 member, shown simply as "Personal"), and may
+// own or belong to any number of `team` accounts. See the Team model.
+enum TeamKind {
+  personal
+  team
+}
+
+enum TeamRole {
+  owner
+  admin
+  billing
+  developer
+  viewer
+}
+
+// -- Catalog --
+enum ComponentKind {
+  gpu
+  cpu
+  memory
+  storage
+  network
+  other
+}
+
+enum PricingPeriod {
+  hour
+  month
+}
+
+enum PricingMode {
+  components
+  flat
+}
+
+enum TierStatus {
+  available
+  limited
+  out_of_stock
+}
+
+enum ModelFamily {
+  kimi
+  deepseek
+  llama
+  qwen
+  mistral
+  gemma
+  phi
+  falcon
+  custom
+}
+
+enum Modality {
+  chat
+  completion
+  vision
+  image_generation
+  embedding
+  audio
+  code
+}
+
+enum ModelUseCaseFit {
+  excellent
+  good
+  possible
+}
+
+enum AIModelStatus {
+  available
+  beta
+  coming_soon
+  deprecated
+}
+
+// -- Billing / Payment --
+enum CreditTransactionType {
+  topup
+  charge
+  refund
+  adjustment
+  bonus
+  signup_credit
+  debt_accrual
+  debt_settlement
+  debt_writeoff
+  dispute
+}
+
+enum CreditTransactionSource {
+  stripe
+  lemonsqueezy
+  polar
+  admin
+  system
+}
+
+enum PaymentMethodGateway {
+  stripe
+  polar
+  // LemonSqueezy deliberately has no value here — it is a Merchant of Record
+  // and structurally cannot store or charge a card, so it never writes a
+  // PaymentMethod row.
+}
+
+enum PaymentMethodStatus {
+  active
+  expired
+  requires_action
+  removed
+}
+
+enum PaymentType {
+  topup
+  one_time
+}
+
+enum PaymentStatus {
+  succeeded
+  pending
+  failed
+  refunded
+  cancelled
+}
+
+// -- Deployment --
+enum DeploymentStatus {
+  pending_review
+  approved
+  rejected
+  provisioning
+  running
+  paused
+  stopped
+  failed
+  terminated
+}
+
+enum BillingMethod {
+  prepaid
+  payg
+}
+
+enum DeploymentUsageKind {
+  compute
+  storage
+}
+
+// -- Notification --
+enum NotificationRecipientType {
+  customer
+  admin
+  all
+}
+
+enum NotificationPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+// -- Admin --
+enum ActivityLogActionType {
+  create
+  read
+  update
+  delete
+  auth
+  export
+  system
+}
+
+enum ActivityLogStatus {
+  success
+  failed
+  warning
+  error
+}
+
+// AdminSettings.activePaymentGateway — switches between the configured
+// gateways platform-wide; deliberately its own column rather than buried in a
+// Json settings blob since app code branches on it directly. Polar is the
+// gateway that can do off-session/card-on-file charging from a Pakistan-based
+// merchant account — Stripe cannot onboard Pakistan, LemonSqueezy cannot store
+// cards at all (see PaymentMethodGateway).
+enum PaymentGateway {
+  stripe
+  lemonsqueezy
+  polar
+  none
+}
+
+// Shared by BlogPost.status and MarketingPage.status — identical vocab.
+enum PublishStatus {
+  draft
+  published
+  archived
+}
+
+enum CronActionType {
+  http
+  log
+  email
+  cleanup
+  notification
+  backup
+}
+
+enum HttpMethod {
+  GET
+  POST
+  PUT
+  DELETE
+}
+
+enum CronCleanupTarget {
+  activityLogs
+  notifications
+  unverifiedUsers
+  expiredSessions
+  failedJobs
+}
+
+enum CronLastStatus {
+  success
+  error
+}
+
+enum JourneyMode {
+  model_first
+  requirements_first
+}
+
+enum JourneyStepType {
+  intro
+  question
+  question_group
+  model_match
+  recommendation
+  name
+  review
+  custom
+}
+
+enum MarketingBlockType {
+  hero
+  features
+  pricing
+  cta
+  faq
+  text
+  contact
+  stats
+  testimonials
+  custom
+  steps
+  split
+  code_sample
+  logos
+  comparison
+  product_showcase
+  model_catalog
+  gpu_pricing
+  use_cases
+  machine_cards
+}
+
+enum QuestionType {
+  select
+  multiselect
+  text
+  textarea
+  number
+  radio
+  boolean
+}
+
+// ============================================================================
+// ==== User domain ====
+// ============================================================================
+
+model User {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name     String
+  email    String @unique
+  phone    String @default("")
+  password String
+
+  accountType AccountType @default(customer) @map("account_type")
+  role        Role        @default(customer)
+
+  customRoleId String?     @map("custom_role_id") @db.Uuid
+  customRole   CustomRole? @relation("UserCustomRole", fields: [customRoleId], references: [id], onDelete: SetNull)
+
+  status UserStatus @default(pending_verification)
+
+  isEmailVerified          Boolean   @default(false) @map("is_email_verified")
+  emailVerificationToken   String?   @map("email_verification_token")
+  emailVerificationExpires DateTime? @map("email_verification_expires")
+
+  // Unused dead weight — LemonSqueezy's checkout is stateless per-transaction
+  // and needs no stored customer id.
+  lemonSqueezyCustomerId String? @map("lemon_squeezy_customer_id")
+
+  // stripeCustomerId / polarCustomerId, disputeHold and paygAccess used to
+  // live here. They describe the account that pays — its card, a chargeback on
+  // it, whether it may run a tab — so they moved to Team with the money.
+
+  // Admin-specific fields
+  department  String? // soft reference to Department.value, never a real FK
+  permissions Json? // an open-ended permission map
+
+  assignedById String? @map("assigned_by_id") @db.Uuid
+  assignedBy   User?   @relation("UserAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  avatar String?
+
+  googleId String? @unique @map("google_id") // unique when set; Postgres allows many NULLs
+
+  lastLogin   DateTime? @map("last_login")
+  lastLoginIP String?   @map("last_login_ip")
+
+  loginAttempts Int       @default(0) @map("login_attempts")
+  lockUntil     DateTime? @map("lock_until")
+
+  timezone String @default("UTC")
+
+  // Which language the customer center renders for this user, and whether they
+  // have ever actually chosen one. The two are separate because "en" is both
+  // the default and a legitimate deliberate choice — without the flag there is
+  // no way to tell a user who picked English from one who was never asked, and
+  // the first-run language prompt would nag the former forever.
+  //
+  // Deliberately a plain String and not an enum: which languages are live is an
+  // admin setting (AdminSettings.features.languages), so an enum would mean a
+  // migration every time an operator adds one — the exact thing this feature
+  // exists to avoid.
+  language              String  @default("en")
+  languagePreferenceSet Boolean @default(false) @map("language_preference_set")
+
+  // Chose "my team / company" at signup and has not yet finished (or skipped)
+  // creating their organization. Drives the post-signup onboarding; an
+  // individual signup leaves it false and sees nothing new.
+  teamOnboardingPending Boolean @default(false) @map("team_onboarding_pending")
+
+  passwordResetToken   String?   @map("password_reset_token")
+  passwordResetExpires DateTime? @map("password_reset_expires")
+
+  resetPasswordRequestedById String? @map("reset_password_requested_by_id") @db.Uuid
+  resetPasswordRequestedBy   User?   @relation("UserResetPasswordRequestedBy", fields: [resetPasswordRequestedById], references: [id], onDelete: SetNull)
+
+  resetPasswordRequestedAt DateTime? @map("reset_password_requested_at")
+  passwordChangeRequired   Boolean   @default(false) @map("password_change_required")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // ---- self-relation back-arrays ----
+  assignedUsers                 User[] @relation("UserAssignedBy")
+  resetPasswordRequestedByUsers User[] @relation("UserResetPasswordRequestedBy")
+
+  // ---- back-relations for createdBy/updatedBy/etc. across other models ----
+  createdCustomRoles                    CustomRole[]                     @relation("CustomRoleCreatedBy")
+  updatedCustomRoles                    CustomRole[]                     @relation("CustomRoleUpdatedBy")
+  createdUseCaseTags                    UseCaseTag[]                     @relation("UseCaseTagCreatedBy")
+  updatedUseCaseTags                    UseCaseTag[]                     @relation("UseCaseTagUpdatedBy")
+  createdTierCategories                 TierCategory[]                   @relation("TierCategoryCreatedBy")
+  updatedTierCategories                 TierCategory[]                   @relation("TierCategoryUpdatedBy")
+  createdResourceComponents             ResourceComponent[]              @relation("ResourceComponentCreatedBy")
+  updatedResourceComponents             ResourceComponent[]              @relation("ResourceComponentUpdatedBy")
+  createdTiers                          Tier[]                           @relation("TierCreatedBy")
+  updatedTiers                          Tier[]                           @relation("TierUpdatedBy")
+  createdAIModels                       AIModel[]                        @relation("AIModelCreatedBy")
+  updatedAIModels                       AIModel[]                        @relation("AIModelUpdatedBy")
+  createdTeams                          Team[]                           @relation("TeamCreatedBy")
+  teamMemberships                       TeamMember[]                     @relation("TeamMemberUser")
+  invitedTeamMembers                    TeamMember[]                     @relation("TeamMemberInvitedBy")
+  sentTeamInvitations                   TeamInvitation[]                 @relation("TeamInvitationInvitedBy")
+  teamActivity                          TeamActivity[]                   @relation("TeamActivityActor")
+  ownershipTransfersOffered             OwnershipTransfer[]              @relation("OwnershipTransferFrom")
+  ownershipTransfersReceived            OwnershipTransfer[]              @relation("OwnershipTransferTo")
+  teamJoinRequests                      TeamJoinRequest[]                @relation("TeamJoinRequestUser")
+  teamJoinRequestsDecided               TeamJoinRequest[]                @relation("TeamJoinRequestDecidedBy")
+  teamJoinLinks                         TeamJoinLink[]                   @relation("TeamJoinLinkCreatedBy")
+  creditTransactions                    CreditTransaction[]              @relation("CreditTransactionUser")
+  createdCreditTransactions             CreditTransaction[]              @relation("CreditTransactionCreatedBy")
+  paymentMethods                        PaymentMethod[]                  @relation("PaymentMethodUser")
+  payments                              Payment[]                        @relation("PaymentUser")
+  deployments                           Deployment[]                     @relation("DeploymentUser")
+  assignedDeployments                   Deployment[]                     @relation("DeploymentAssignedTo")
+  shutdownDeployments                   Deployment[]                     @relation("DeploymentShutdownCompletedBy")
+  deploymentUsages                      DeploymentUsage[]                @relation("DeploymentUsageUser")
+  deploymentStatusHistoryEntries        DeploymentStatusHistory[]        @relation("DeploymentStatusHistoryBy")
+  deploymentBillingMethodHistoryEntries DeploymentBillingMethodHistory[] @relation("DeploymentBillingMethodHistoryActor")
+  receivedNotifications                 Notification[]                   @relation("NotificationRecipient")
+  sentNotifications                     Notification[]                   @relation("NotificationSender")
+  activityLogs                          ActivityLog[]                    @relation("ActivityLogUser")
+  blogPosts                             BlogPost[]                       @relation("BlogPostAuthor")
+  createdCronJobs                       CronJob[]                        @relation("CronJobCreatedBy")
+  customerNotes                         CustomerNote[]                   @relation("CustomerNoteCustomer")
+  authoredCustomerNotes                 CustomerNote[]                   @relation("CustomerNoteAuthor")
+  createdDepartments                    Department[]                     @relation("DepartmentCreatedBy")
+  updatedDepartments                    Department[]                     @relation("DepartmentUpdatedBy")
+  createdDeploymentJourneys             DeploymentJourney[]              @relation("DeploymentJourneyCreatedBy")
+  updatedDeploymentJourneys             DeploymentJourney[]              @relation("DeploymentJourneyUpdatedBy")
+  editedMarketingPages                  MarketingPage[]                  @relation("MarketingPageLastEditedBy")
+  createdQuestionTemplates              QuestionTemplate[]               @relation("QuestionTemplateCreatedBy")
+  updatedQuestionTemplates              QuestionTemplate[]               @relation("QuestionTemplateUpdatedBy")
+  updatedRecommendationPolicies         RecommendationPolicy[]           @relation("RecommendationPolicyUpdatedBy")
+  createdSeoRedirects                   SeoRedirect[]                    @relation("SeoRedirectCreatedBy")
+
+  @@map("users")
+}
+
+model CustomRole {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name        String   @unique
+  description String?
+  permissions String[]
+  isActive    Boolean  @default(true) @map("is_active")
+
+  // Nullable + SetNull so deleting the admin who created a role doesn't make
+  // that admin undeletable. Matches `updatedById` below and every other
+  // created_by/updated_by column in this schema.
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("CustomRoleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("CustomRoleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users User[] @relation("UserCustomRole")
+
+  @@map("custom_roles")
+}
+
+// ============================================================================
+// ==== Catalog domain ====
+// ============================================================================
+
+model UseCaseTag {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  key         String @unique
+  label       String
+  description String @default("")
+  icon        String @default("")
+
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("UseCaseTagCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("UseCaseTagUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([displayOrder])
+  @@map("use_case_tags")
+}
+
+model TierCategory {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name        String  @unique
+  slug        String? @unique
+  description String  @default("")
+  icon        String  @default("")
+  color       String  @default("")
+
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("TierCategoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("TierCategoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tiers Tier[] @relation("TierTierCategory")
+
+  @@index([slug])
+  @@index([displayOrder])
+  @@map("tier_categories")
+}
+
+model ResourceComponent {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name        String        @unique
+  slug        String?       @unique
+  kind        ComponentKind
+  description String        @default("")
+  unitLabel   String        @default("unit") @map("unit_label")
+
+  // What the admin typed, in the period they chose
+  pricePerUnit        Decimal       @map("price_per_unit") @db.Decimal(12, 6)
+  pricingPeriod       PricingPeriod @default(hour) @map("pricing_period")
+  // Normalised hourly figure everything else reads. Derived on save by the
+  // pricing service — six decimals, since a per-GB-hour disk price is
+  // genuinely that small (0.00012 rounded to four would be a 17% error).
+  pricePerUnitPerHour Decimal       @default(0) @map("price_per_unit_per_hour") @db.Decimal(12, 6)
+  // Snapshotted from billing settings at save time so a later settings change
+  // cannot silently reprice every machine on the platform.
+  hoursPerMonth       Int           @default(730) @map("hours_per_month")
+
+  currency String @default("USD")
+
+  billedWhileStopped Boolean @default(false) @map("billed_while_stopped")
+
+  minQuantity  Int @default(1) @map("min_quantity")
+  maxQuantity  Int @default(0) @map("max_quantity")
+  stepQuantity Int @default(1) @map("step_quantity")
+
+  specs Json?
+
+  availableForCustomBuilds Boolean @default(true) @map("available_for_custom_builds")
+
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("ResourceComponentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("ResourceComponentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tierComponents TierComponent[] @relation("TierComponentResourceComponent")
+
+  @@index([slug])
+  @@index([kind, displayOrder])
+  @@index([isActive])
+  @@map("resource_components")
+}
+
+model Tier {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name        String  @unique
+  slug        String? @unique
+  description String  @default("")
+
+  categoryId String?       @map("category_id") @db.Uuid
+  category   TierCategory? @relation("TierTierCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+
+  components TierComponent[] @relation("TierComponents")
+
+  // ── Pricing ──
+  pricingMode                            PricingMode @default(flat) @map("pricing_mode")
+  pricingFlatPricePerHour                Decimal     @default(0) @map("pricing_flat_price_per_hour") @db.Decimal(12, 4)
+  pricingFlatStoppedPricePerHour         Decimal     @default(0) @map("pricing_flat_stopped_price_per_hour") @db.Decimal(12, 4)
+  pricingMarkupPercent                   Decimal     @default(0) @map("pricing_markup_percent") @db.Decimal(7, 4)
+  pricingComponentSubtotalPerHour        Decimal     @default(0) @map("pricing_component_subtotal_per_hour") @db.Decimal(12, 4)
+  pricingComponentStoppedSubtotalPerHour Decimal     @default(0) @map("pricing_component_stopped_subtotal_per_hour") @db.Decimal(12, 4)
+
+  // Final derived rates — every read path (catalog, sizing engine, billing) reads these
+  pricePerHour        Decimal @default(0) @map("price_per_hour") @db.Decimal(12, 4)
+  stoppedPricePerHour Decimal @default(0) @map("stopped_price_per_hour") @db.Decimal(12, 4)
+
+  currency String @default("USD")
+
+  // ── Hardware spec (derived from components when present, hand-entered otherwise) ──
+  gpuModel    String @default("") @map("gpu_model")
+  gpuCount    Int    @default(0) @map("gpu_count")
+  vramGb      Float  @default(0) @map("vram_gb")
+  vcpu        Float  @default(0)
+  ramGb       Float  @default(0) @map("ram_gb")
+  storageGb   Float  @default(0) @map("storage_gb")
+  storageType String @default("") @map("storage_type")
+  networkGbps Float  @default(0) @map("network_gbps")
+
+  regions String[] @default(["default"])
+
+  capacityTotal     Int @default(0) @map("capacity_total")
+  capacityAllocated Int @default(0) @map("capacity_allocated")
+
+  status TierStatus @default(available)
+
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  metadata Json?
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("TierCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("TierUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  supportedByModels               AIModelSupportedTier[] @relation("AIModelSupportedTierTier")
+  deployments                     Deployment[]           @relation("DeploymentTier")
+  deploymentSizingRecommendations Deployment[]           @relation("DeploymentSizingRecommendedTier")
+
+  @@index([slug])
+  @@index([isActive])
+  @@index([displayOrder])
+  @@index([categoryId])
+  @@map("tiers")
+}
+
+// One line of a tier's bill of materials. `{ _id: false }` in the source —
+// a child row of its parent, with no identity of its own.
+model TierComponent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tierId String @map("tier_id") @db.Uuid
+  tier   Tier   @relation("TierComponents", fields: [tierId], references: [id], onDelete: Cascade)
+  order  Int    @default(0)
+
+  componentId String            @map("component_id") @db.Uuid
+  component   ResourceComponent @relation("TierComponentResourceComponent", fields: [componentId], references: [id], onDelete: Restrict)
+
+  // Snapshotted from ResourceComponent when the line was last resolved
+  kind      String @default("other")
+  name      String @default("")
+  slug      String @default("")
+  unitLabel String @default("unit") @map("unit_label")
+
+  quantity           Decimal @db.Decimal(12, 4)
+  unitPricePerHour   Decimal @default(0) @map("unit_price_per_hour") @db.Decimal(12, 6)
+  billedWhileStopped Boolean @default(false) @map("billed_while_stopped")
+  lineTotalPerHour   Decimal @default(0) @map("line_total_per_hour") @db.Decimal(12, 6)
+
+  specs Json?
+
+  @@index([tierId, order])
+  @@index([componentId])
+  @@map("tier_components")
+}
+
+model AIModel {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name String  @unique
+  slug String? @unique
+
+  family  ModelFamily @default(custom)
+  version String      @default("")
+
+  shortDescription String @default("") @map("short_description")
+  description      String @default("")
+
+  logoUrl       String @default("") @map("logo_url")
+  docsUrl       String @default("") @map("docs_url")
+  huggingFaceId String @default("") @map("hugging_face_id")
+  license       String @default("")
+
+  modalities Modality[] @default([chat])
+
+  parameterSize String @default("") @map("parameter_size")
+  contextLength Int    @default(0) @map("context_length")
+  minVramGb     Float  @default(0) @map("min_vram_gb")
+
+  supportedTiers AIModelSupportedTier[] @relation("AIModelSupportedTiers")
+  useCases       AIModelUseCase[]       @relation("AIModelUseCases")
+
+  strengths   String[] @default([])
+  limitations String[] @default([])
+
+  status AIModelStatus @default(available)
+
+  category String   @default("General")
+  tags     String[] @default([])
+
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+  isFeatured   Boolean @default(false) @map("is_featured")
+
+  metadata Json?
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("AIModelCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("AIModelUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  deployments Deployment[] @relation("DeploymentModel")
+
+  @@index([slug])
+  @@index([isActive])
+  @@index([status])
+  @@index([family])
+  @@index([displayOrder])
+  @@map("ai_models")
+}
+
+// Which tiers a model can run on, and what it costs on each.
+// A child row of its parent, with no identity of its own.
+model AIModelSupportedTier {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  aiModelId String  @map("ai_model_id") @db.Uuid
+  aiModel   AIModel @relation("AIModelSupportedTiers", fields: [aiModelId], references: [id], onDelete: Cascade)
+  order     Int     @default(0)
+
+  tierId String @map("tier_id") @db.Uuid
+  tier   Tier   @relation("AIModelSupportedTierTier", fields: [tierId], references: [id], onDelete: Restrict)
+
+  tierName        String  @default("") @map("tier_name")
+  recommended     Boolean @default(false)
+  priceMultiplier Decimal @default(1) @map("price_multiplier") @db.Decimal(6, 4)
+  notes           String  @default("")
+
+  @@index([aiModelId, order])
+  @@index([tierId])
+  @@map("ai_model_supported_tiers")
+}
+
+// What a model is good at, ticked from the shared UseCaseTag vocabulary.
+// `key` is a soft reference to UseCaseTag.key (never a real FK — same
+// vocabulary QuestionTemplate signals draw from). `{ _id: false }` in the
+// A child row of its parent, with no identity of its own.
+model AIModelUseCase {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  aiModelId String  @map("ai_model_id") @db.Uuid
+  aiModel   AIModel @relation("AIModelUseCases", fields: [aiModelId], references: [id], onDelete: Cascade)
+  order     Int     @default(0)
+
+  key   String
+  label String          @default("")
+  fit   ModelUseCaseFit @default(good)
+  note  String          @default("")
+
+  @@index([aiModelId, order])
+  @@map("ai_model_use_cases")
+}
+
+// ============================================================================
+// ==== Billing / Payment domain ====
+// ============================================================================
+
+// ============================================================================
+// ==== Teams ====
+// ============================================================================
+
+/**
+ * The account that owns money and resources: wallet, ledger, cards, payments,
+ * deployments and usage all hang off a Team, never directly off a User.
+ *
+ * `personal` — the individual account every customer gets at signup. One per
+ * user (partial unique index in the migration), always exactly one member,
+ * and shown to the customer simply as "Personal". An individual who never
+ * creates or joins a team only ever sees this, and the product looks exactly
+ * as it did before teams existed.
+ *
+ * `team` — an organization with members and roles (TeamMember).
+ *
+ * One model for both so there is one billing system, not two: every billing
+ * service takes a team id and does not care which kind it is.
+ */
+model Team {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  kind TeamKind @default(team)
+  name String
+
+  createdById String @map("created_by_id") @db.Uuid
+  createdBy   User   @relation("TeamCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  // Pay-as-you-go access for this account: 'default' follows the platform
+  // switch, 'allowed' / 'blocked' override it. Only the door — every PAYG rule
+  // still applies (fundingService.resolvePaygAccess). DB CHECK in migration.
+  paygAccess String @default("default") @map("payg_access")
+
+  // A chargeback on this account's card — a fraud/trust hold.
+  disputeHold   Boolean   @default(false) @map("dispute_hold")
+  disputeReason String    @default("") @map("dispute_reason")
+  disputedAt    DateTime? @map("disputed_at")
+
+  // The gateway customer this account's saved cards belong to.
+  stripeCustomerId String? @map("stripe_customer_id")
+  polarCustomerId  String? @map("polar_customer_id")
+
+  /**
+   * The company domain this team has proved it controls, and what happens when
+   * somebody with an email at that domain turns up.
+   *
+   * Proof is a DNS TXT record holding `domainToken` — an address at the domain
+   * is not proof, because anyone can be given a mailbox somewhere. Until
+   * `domainVerifiedAt` is set the claim counts for nothing. One verified domain
+   * belongs to one team (partial unique index in the migration), so two teams
+   * cannot both claim to be acme.com.
+   *
+   * `domainJoinMode`: off (default), request (they ask, an owner or admin
+   * decides) or auto (they are in as soon as they verify their email).
+   * `domainJoinRole` is what they come in as, and may only be a role that sees
+   * no money — nobody reaches a team's wallet by signing up with an address.
+   */
+  /**
+    * "Somebody at your company is already here."
+    *
+    * Off for every team until its owner turns it on. Whether an email domain
+    * is a public mailbox provider is not a question any list can answer for
+    * the whole internet, so nothing about a team is ever disclosed because a
+    * domain looked private — it is disclosed because the owner chose to be
+    * findable by colleagues at their own address. The blocklists and the
+    * popularity check sit on top of that consent, never in place of it.
+    */
+  discoverableByDomain Boolean @default(false) @map("discoverable_by_domain")
+
+  verifiedDomain   String?   @map("verified_domain")
+  domainToken      String?   @map("domain_token")
+  domainVerifiedAt DateTime? @map("domain_verified_at")
+  domainJoinMode   String    @default("off") @map("domain_join_mode")
+  domainJoinRole   TeamRole  @default(developer) @map("domain_join_role")
+
+  // Soft delete only — the ledger of an account that ever held money is kept.
+  deletedAt DateTime? @map("deleted_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members            TeamMember[]        @relation("TeamMemberTeam")
+  invitations        TeamInvitation[]    @relation("TeamInvitationTeam")
+  activity           TeamActivity[]      @relation("TeamActivityTeam")
+  ownershipTransfers OwnershipTransfer[] @relation("OwnershipTransferTeam")
+  joinRequests       TeamJoinRequest[]   @relation("TeamJoinRequestTeam")
+  joinLinks          TeamJoinLink[]      @relation("TeamJoinLinkTeam")
+  seatCharges        TeamSeatCharge[]    @relation("TeamSeatChargeTeam")
+  wallet             CreditWallet?       @relation("CreditWalletTeam")
+  creditTransactions CreditTransaction[] @relation("CreditTransactionTeam")
+  paymentMethods     PaymentMethod[]     @relation("PaymentMethodTeam")
+  payments           Payment[]           @relation("PaymentTeam")
+  deployments        Deployment[]        @relation("DeploymentTeam")
+  deploymentUsages   DeploymentUsage[]   @relation("DeploymentUsageTeam")
+
+  @@index([createdById])
+  @@map("teams")
+}
+
+model TeamMember {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("TeamMemberTeam", fields: [teamId], references: [id], onDelete: Cascade)
+
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation("TeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  role TeamRole @default(developer)
+
+  // Monthly spend ceiling for this member in the platform currency. Null = no
+  // limit. Enforced in fundingService for the roles it applies to.
+  spendLimitMonthly Decimal? @map("spend_limit_monthly") @db.Decimal(12, 4)
+
+  // The highest spend-limit alert already sent to the team's owner/admins this
+  // month (80 or 100), and which month that was ("YYYY-MM", UTC) — so each
+  // threshold notifies once per month, not on every hourly run.
+  limitAlertLevel Int     @default(0) @map("limit_alert_level")
+  limitAlertMonth String? @map("limit_alert_month")
+
+  invitedById String? @map("invited_by_id") @db.Uuid
+  invitedBy   User?   @relation("TeamMemberInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  joinedAt  DateTime @default(now()) @map("joined_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+/**
+ * An invitation to join a team by email. The link's token is never stored —
+ * only its SHA-256 — so a leaked database cannot be used to join anything.
+ * Single-use (acceptedAt), revocable, expiring, and bound to the invited
+ * email: only a verified account with that exact address can accept it.
+ */
+model TeamInvitation {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("TeamInvitationTeam", fields: [teamId], references: [id], onDelete: Cascade)
+
+  email String // lower-cased
+  role  TeamRole
+
+  tokenHash String @unique @map("token_hash")
+
+  invitedById String? @map("invited_by_id") @db.Uuid
+  invitedBy   User?   @relation("TeamInvitationInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  expiresAt  DateTime  @map("expires_at")
+  acceptedAt DateTime? @map("accepted_at")
+  declinedAt DateTime? @map("declined_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([email])
+  @@map("team_invitations")
+}
+
+/**
+ * What happened inside a team, in the team's own words: who invited whom, who
+ * changed a role or a spend limit, who left, who handed over the team. Read by
+ * the team's Owner/Admin in the customer center. The admin audit trail
+ * (`ActivityLog`) is a separate, admin-facing table and the two never mix —
+ * one customer must never be able to read the platform's own log.
+ *
+ * The actor's name and email are copied onto the row. Someone who has since
+ * been removed from the team, or deleted their account, must still read as the
+ * person who did it: a history that decays into "someone" is not a history.
+ *
+ * `action` is a stable key, never a sentence, and `metadata` carries the names
+ * and values it needs — so the customer center renders every entry in the
+ * reader's own language, for the same reason notifications store a
+ * `contentKey` instead of prose.
+ */
+model TeamActivity {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("TeamActivityTeam", fields: [teamId], references: [id], onDelete: Cascade)
+
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  actor       User?   @relation("TeamActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorName   String  @map("actor_name")
+  actorEmail  String  @map("actor_email")
+
+  action String
+
+  // Polymorphic, like ActivityLog.targetId: a plain id, because the thing it
+  // points at may since have been removed and the entry is still worth having.
+  targetType String? @map("target_type")
+  targetId   String? @map("target_id")
+  targetName String? @map("target_name")
+
+  metadata Json @default("{}")
+
+  ipAddress String? @map("ip_address")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([teamId, createdAt(sort: Desc)])
+  @@map("team_activity")
+}
+
+/**
+ * A pending handover of a team to one of its existing members. Ownership never
+ * moves on one person's say-so: the owner offers, the member accepts, and only
+ * then do the two roles swap — the old owner stays on as an admin rather than
+ * being dropped out of their own team.
+ *
+ * None of the money moves with it. The wallet, the cards and any outstanding
+ * balance belong to the team, so a transfer can never be used to hand a debt
+ * to someone else or to walk away from one.
+ *
+ * At most one offer is open per team at a time (partial unique index in the
+ * migration), and an offer expires if it is left unanswered.
+ */
+model OwnershipTransfer {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("OwnershipTransferTeam", fields: [teamId], references: [id], onDelete: Cascade)
+
+  fromUserId String @map("from_user_id") @db.Uuid
+  fromUser   User   @relation("OwnershipTransferFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+
+  toUserId String @map("to_user_id") @db.Uuid
+  toUser   User   @relation("OwnershipTransferTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  expiresAt   DateTime  @map("expires_at")
+  acceptedAt  DateTime? @map("accepted_at")
+  declinedAt  DateTime? @map("declined_at")
+  cancelledAt DateTime? @map("cancelled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([toUserId])
+  @@map("ownership_transfers")
+}
+
+/**
+ * Someone with an email at a team's verified domain asking to be let in, for a
+ * team whose `domainJoinMode` is `request`. An owner or admin answers it.
+ *
+ * A colleague turning up is not the same as a colleague being trusted, which
+ * is why `request` is the mode a team is nudged towards: `auto` lets in
+ * everyone the domain's mail admin ever creates an address for.
+ *
+ * One open request per person per team (partial unique index in the
+ * migration), so asking twice cannot fill anyone's screen.
+ */
+model TeamJoinRequest {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("TeamJoinRequestTeam", fields: [teamId], references: [id], onDelete: Cascade)
+
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation("TeamJoinRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  // The address it was asked from, kept as written: the request is only valid
+  // while it still matches the team's verified domain.
+  email String
+
+  // The link it came through, or null when it came from the company-domain
+  // hint. Either way an owner or admin still has to say yes.
+  joinLinkId String?       @map("join_link_id") @db.Uuid
+  joinLink   TeamJoinLink? @relation("TeamJoinLinkRequests", fields: [joinLinkId], references: [id], onDelete: SetNull)
+
+  decidedById String? @map("decided_by_id") @db.Uuid
+  decidedBy   User?   @relation("TeamJoinRequestDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  approvedAt  DateTime? @map("approved_at")
+  declinedAt  DateTime? @map("declined_at")
+  cancelledAt DateTime? @map("cancelled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([userId])
+  @@map("team_join_requests")
+}
+
+/**
+ * One link a team can hand round its own chat: whoever opens it can ask to
+ * join, and an owner or admin decides. Asking, not entering, is the whole
+ * point — a link that is forwarded, screenshotted or left in an ex-employee's
+ * inbox gets somebody a refusal, not an account that spends money.
+ *
+ * Only the SHA-256 of the token is stored, as with invitations, so a copy of
+ * the database cannot be used to join anything. A link expires, can be revoked
+ * and can carry a cap on how many people come through it; re-issuing one
+ * revokes the last (partial unique index in the migration), because a second
+ * forgotten door is exactly what this must not become.
+ *
+ * `role` is limited to Developer or Viewer by a database CHECK: opening a link
+ * must never be a way to reach a team's money.
+ */
+/**
+ * One day of a team's seat fee, and the proof it was charged.
+ *
+ * The fee is billed a day at a time so that joining mid-month costs from that
+ * day and leaving stops costing the same afternoon. The unique (team, day)
+ * index is what makes a second run of the job — a retry, a restart, an admin
+ * pressing it again — harmless: the day is already settled, so nothing happens.
+ *
+ * The row keeps what cannot be worked out later: how many seats there were,
+ * how many the platform gave away, and the monthly fee in force that day.
+ * `toWallet` and `toDebt` record what the wallet could cover and what became
+ * debt — an unpaid seat fee is owed, never forgiven.
+ */
+model TeamSeatCharge {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("TeamSeatChargeTeam", fields: [teamId], references: [id], onDelete: Cascade)
+
+  day DateTime @db.Date
+
+  seats      Int     @map("seats")
+  freeSeats  Int     @map("free_seats")
+  monthlyFee Decimal @map("monthly_fee") @db.Decimal(12, 4)
+
+  amount   Decimal @db.Decimal(12, 4)
+  toWallet Decimal @default(0) @map("to_wallet") @db.Decimal(12, 4)
+  toDebt   Decimal @default(0) @map("to_debt") @db.Decimal(12, 4)
+  currency String  @default("USD")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([teamId, day])
+  @@index([day(sort: Desc)])
+  @@map("team_seat_charges")
+}
+
+model TeamJoinLink {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("TeamJoinLinkTeam", fields: [teamId], references: [id], onDelete: Cascade)
+
+  tokenHash String @unique @map("token_hash")
+
+  role TeamRole @default(developer)
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("TeamJoinLinkCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  expiresAt DateTime  @map("expires_at")
+  maxUses   Int?      @map("max_uses")
+  usedCount Int       @default(0) @map("used_count")
+  revokedAt DateTime? @map("revoked_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  requests TeamJoinRequest[] @relation("TeamJoinLinkRequests")
+
+  @@index([teamId, createdAt(sort: Desc)])
+  @@map("team_join_links")
+}
+
+model CreditWallet {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  teamId String @unique @map("team_id") @db.Uuid
+  team   Team   @relation("CreditWalletTeam", fields: [teamId], references: [id])
+
+  balance            Decimal @default(0) @db.Decimal(12, 4)
+  // Unpaid pay-as-you-go balance the spendable `balance` couldn't cover.
+  // Deliberately separate — `balance` never goes negative. See debtService.
+  outstandingBalance Decimal @default(0) @map("outstanding_balance") @db.Decimal(12, 4)
+
+  debtSince      DateTime? @map("debt_since")
+  debtNotifiedAt DateTime? @map("debt_notified_at")
+
+  lastAutoChargeAt    DateTime? @map("last_auto_charge_at")
+  autoChargeFailures  Int       @default(0) @map("auto_charge_failures")
+  lastAutoChargeError String    @default("") @map("last_auto_charge_error")
+
+  currency String @default("USD")
+
+  lifetimeTopUp Decimal @default(0) @map("lifetime_top_up") @db.Decimal(14, 4)
+  lifetimeSpend Decimal @default(0) @map("lifetime_spend") @db.Decimal(14, 4)
+
+  // autoTopUp{} flattened — small fixed-shape nested object
+  autoTopUpEnabled   Boolean @default(false) @map("auto_top_up_enabled")
+  autoTopUpThreshold Decimal @default(10) @map("auto_top_up_threshold") @db.Decimal(12, 4)
+  autoTopUpAmount    Decimal @default(50) @map("auto_top_up_amount") @db.Decimal(12, 4)
+
+  lowBalanceNotifiedAt DateTime? @map("low_balance_notified_at")
+  suspendedAt          DateTime? @map("suspended_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  creditTransactions CreditTransaction[] @relation("CreditTransactionWallet")
+
+  @@map("credit_wallets")
+}
+
+// The immutable ledger behind CreditWallet. Append-only — createdAt only, no
+// updatedAt. `userId`/`walletId` are onDelete: Restrict — stricter than
+// A deliberate integrity constraint so a
+// ledger row can never lose its link.
+model CreditTransaction {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // The account the money moved in.
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("CreditTransactionTeam", fields: [teamId], references: [id], onDelete: Restrict)
+
+  // The member it was on behalf of, when there is one (who paid a top-up, who
+  // created the deployment being charged). Null for account-level entries.
+  userId String? @map("user_id") @db.Uuid
+  user   User?   @relation("CreditTransactionUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  walletId String       @map("wallet_id") @db.Uuid
+  wallet   CreditWallet @relation("CreditTransactionWallet", fields: [walletId], references: [id], onDelete: Restrict)
+
+  type CreditTransactionType
+
+  // Signed: + credit, - debit. Always the change to wallet.balance — 0 for a
+  // row that only affects the debt side.
+  amount       Decimal @db.Decimal(12, 4)
+  balanceAfter Decimal @map("balance_after") @db.Decimal(12, 4)
+
+  // Signed change to CreditWallet.outstandingBalance this row caused.
+  debtDelta        Decimal @default(0) @map("debt_delta") @db.Decimal(12, 4)
+  outstandingAfter Decimal @default(0) @map("outstanding_after") @db.Decimal(12, 4)
+
+  currency String @default("USD")
+
+  source CreditTransactionSource @default(system)
+
+  // Polymorphic (Payment._id for top-ups, Deployment._id for hourly charges)
+  // — kept as an (id, model_name) string pair, no DB constraint, matching
+  // current behavior exactly.
+  referenceId    String? @map("reference_id")
+  referenceModel String? @map("reference_model")
+
+  description String @default("")
+  metadata    Json?
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("CreditTransactionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  usageAsTransaction     DeploymentUsage[] @relation("DeploymentUsageTransaction")
+  usageAsDebtTransaction DeploymentUsage[] @relation("DeploymentUsageDebtTransaction")
+
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([walletId])
+  @@index([type, createdAt(sort: Desc)])
+  @@index([referenceId])
+  @@map("credit_transactions")
+}
+
+model PaymentMethod {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // The account the card pays for.
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("PaymentMethodTeam", fields: [teamId], references: [id])
+
+  // The member who added it.
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation("PaymentMethodUser", fields: [userId], references: [id])
+
+  gateway PaymentMethodGateway @default(stripe)
+
+  providerCustomerId      String @map("provider_customer_id")
+  providerPaymentMethodId String @map("provider_payment_method_id")
+
+  // Stripe's own card fingerprint — same card, same value, regardless of who
+  // tokenized it. Used to dedupe abuse across accounts.
+  fingerprint String @default("")
+
+  brand    String @default("")
+  last4    String @default("")
+  expMonth Int?   @map("exp_month")
+  expYear  Int?   @map("exp_year")
+
+  isDefault Boolean @default(false) @map("is_default")
+
+  status PaymentMethodStatus @default(active)
+
+  verifiedAt DateTime  @default(now()) @map("verified_at")
+  lastUsedAt DateTime? @map("last_used_at")
+
+  // lastFailure{} flattened — small fixed-shape nested object
+  lastFailureCode    String    @default("") @map("last_failure_code")
+  lastFailureMessage String    @default("") @map("last_failure_message")
+  lastFailureAt      DateTime? @map("last_failure_at")
+
+  // Smallest "days until expiry" threshold already warned about (30, then
+  // 14, then 7) — not just whether a warning was ever sent.
+  lastExpiryWarningDays Int? @map("last_expiry_warning_days")
+
+  // When the card was last proven to still work by actually putting a small
+  // authorisation through it and releasing it again (billingSettings.cardGate
+  // .verifyWithAuthHold). `verifiedAt` only records that the card was once
+  // tokenized successfully; a card can be cancelled, frozen or emptied long
+  // after that and still look perfectly valid here, which is how an account
+  // could run up pay-as-you-go debt against a card that had not been usable
+  // for months. This is the timestamp the funding gate ages out.
+  lastLiveCheckAt DateTime? @map("last_live_check_at")
+
+  removedAt DateTime? @map("removed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // One Stripe PaymentMethod object should only ever be attached once.
+  @@unique([providerCustomerId, providerPaymentMethodId])
+  @@index([teamId, status])
+  @@index([userId, status])
+  @@index([fingerprint])
+  @@index([status])
+  @@map("payment_methods")
+}
+
+// Append-only — createdAt only, no updatedAt.
+model Payment {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // The account the money was paid into.
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("PaymentTeam", fields: [teamId], references: [id])
+
+  // The member who paid.
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation("PaymentUser", fields: [userId], references: [id])
+
+  stripePaymentIntentId String? @unique @map("stripe_payment_intent_id")
+  stripeInvoiceId       String? @unique @map("stripe_invoice_id")
+
+  type PaymentType @default(topup)
+
+  creditsAdded Decimal @default(0) @map("credits_added") @db.Decimal(12, 4)
+  amount       Decimal @db.Decimal(12, 4)
+  currency     String  @default("usd")
+
+  status PaymentStatus @default(pending)
+
+  description String?
+  receiptUrl  String? @map("receipt_url")
+  invoiceUrl  String? @map("invoice_url")
+
+  metadata Json?
+
+  paidAt    DateTime? @map("paid_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("payments")
+}
+
+// ============================================================================
+// ==== Notification domain ====
+// ============================================================================
+
+// Append-only — createdAt only, no updatedAt. Expiry of
+// `expiresAt` (auto-delete) has no Postgres equivalent; Phase 5 replaces it
+// with a `notificationCleanup` cron job doing
+// `prisma.notification.deleteMany({ where: { expiresAt: { lt: new Date() } } })`.
+model Notification {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  recipientId   String                    @map("recipient_id") @db.Uuid
+  recipient     User                      @relation("NotificationRecipient", fields: [recipientId], references: [id])
+  recipientType NotificationRecipientType @default(customer) @map("recipient_type")
+
+  // Large, app-editable vocab (~20 values) — stays String, not an enum.
+  type String
+
+  // The English wording, frozen at write time. Still written for every
+  // notification: it is what the admin history shows, and it is the whole
+  // answer for any row that predates `contentKey`.
+  title   String
+  message String
+
+  // Which piece of copy this is (e.g. 'deployment.ready'), so the bell can be
+  // rendered in the reader's own language at read time instead of being stuck
+  // in whatever language it happened to be written in. Its placeholders come
+  // from `metadata`. Null on older rows, which fall back to `title`/`message`.
+  contentKey String? @map("content_key")
+
+  // action{} flattened — small fixed-shape nested object
+  actionLabel String?
+  actionUrl   String?
+
+  priority NotificationPriority @default(medium)
+
+  isRead Boolean   @default(false) @map("is_read")
+  readAt DateTime? @map("read_at")
+
+  senderId   String? @map("sender_id") @db.Uuid
+  sender     User?   @relation("NotificationSender", fields: [senderId], references: [id], onDelete: SetNull)
+  senderName String  @default("System") @map("sender_name")
+
+  metadata Json?
+
+  expiresAt DateTime? @map("expires_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([recipientId, isRead, createdAt(sort: Desc)])
+  @@index([recipientId, type])
+  @@index([expiresAt])
+  @@map("notifications")
+}
+
+// ============================================================================
+// ==== Deployment domain ====
+// ============================================================================
+
+model Deployment {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // The account that owns and pays for this deployment.
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("DeploymentTeam", fields: [teamId], references: [id])
+
+  // The member who created it — not the owner: a deployment outlives its
+  // creator leaving the team. Used for per-member spend limits.
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation("DeploymentUser", fields: [userId], references: [id])
+
+  deploymentName String @map("deployment_name")
+
+  // ── model{} snapshot (frozen at order time) + nullable convenience FK ──
+  modelId            String?  @map("model_id") @db.Uuid
+  model              AIModel? @relation("DeploymentModel", fields: [modelId], references: [id], onDelete: SetNull)
+  modelName          String   @default("") @map("model_name")
+  modelSlug          String   @default("") @map("model_slug")
+  modelFamily        String   @default("") @map("model_family")
+  modelVersion       String   @default("") @map("model_version")
+  modelParameterSize String   @default("") @map("model_parameter_size")
+  modelContextLength Int      @default(0) @map("model_context_length")
+
+  // ── tier{} snapshot (frozen at order time) + nullable convenience FK ──
+  tierId           String? @map("tier_id") @db.Uuid
+  tier             Tier?   @relation("DeploymentTier", fields: [tierId], references: [id], onDelete: SetNull)
+  tierName         String  @default("") @map("tier_name")
+  tierCategoryName String  @default("") @map("tier_category_name")
+  tierGpuModel     String  @default("") @map("tier_gpu_model")
+  tierGpuCount     Int     @default(0) @map("tier_gpu_count")
+  tierVramGb       Float   @default(0) @map("tier_vram_gb")
+  tierVcpu         Float   @default(0) @map("tier_vcpu")
+  tierRamGb        Float   @default(0) @map("tier_ram_gb")
+  tierStorageGb    Float   @default(0) @map("tier_storage_gb")
+  tierStorageType  String  @default("") @map("tier_storage_type")
+
+  // A machine the customer assembled in the builder rather than picked off the
+  // catalogue. `tierId` is null for these — but it is also null when a
+  // catalogue tier was deleted, so the flag is what distinguishes the two.
+  // `tierCustomBuild` holds the parts list the admin has to provision from,
+  // since no catalogue row will ever reconstruct it.
+  tierIsCustom    Boolean @default(false) @map("tier_is_custom")
+  tierCustomBuild Json?   @map("tier_custom_build")
+
+  region String @default("default")
+
+  // Rate frozen at order time — catalog price changes never affect a live deployment
+  pricePerHour        Decimal @map("price_per_hour") @db.Decimal(12, 4)
+  stoppedPricePerHour Decimal @default(0) @map("stopped_price_per_hour") @db.Decimal(12, 4)
+  planDiscountPercent Decimal @default(0) @map("plan_discount_percent") @db.Decimal(5, 2)
+  currency            String  @default("USD")
+
+  billingMethod        BillingMethod                    @default(prepaid) @map("billing_method")
+  billingMethodHistory DeploymentBillingMethodHistory[] @relation("DeploymentBillingMethodHistories")
+
+  requirements DeploymentRequirement[] @relation("DeploymentRequirements")
+
+  // ── sizing{} — what the recommendation engine advised at order time.
+  // Always recomputed server-side, never accepted from the client. ──
+  sizingJourneyKey             String    @default("") @map("sizing_journey_key")
+  sizingRecommendedTierId      String?   @map("sizing_recommended_tier_id") @db.Uuid
+  sizingRecommendedTier        Tier?     @relation("DeploymentSizingRecommendedTier", fields: [sizingRecommendedTierId], references: [id], onDelete: SetNull)
+  sizingRecommendedTierName    String    @default("") @map("sizing_recommended_tier_name")
+  sizingFollowedRecommendation Boolean?  @map("sizing_followed_recommendation")
+  sizingRequirementProfile     Json?     @map("sizing_requirement_profile")
+  sizingReasons                Json?     @map("sizing_reasons")
+  sizingSuitabilityVerdict     String    @default("") @map("sizing_suitability_verdict")
+  sizingConfidence             String    @default("") @map("sizing_confidence")
+  sizingComputedAt             DateTime? @map("sizing_computed_at")
+
+  status        DeploymentStatus          @default(pending_review)
+  statusHistory DeploymentStatusHistory[] @relation("DeploymentStatusHistories")
+
+  // ── endpoint{} — delivery / access control ──
+  endpointUrl                     String    @default("") @map("endpoint_url")
+  endpointApiKeyEncrypted         String    @default("") @map("endpoint_api_key_encrypted")
+  endpointApiKeyMasked            String    @default("") @map("endpoint_api_key_masked")
+  endpointDocsUrl                 String    @default("") @map("endpoint_docs_url")
+  endpointExtra                   Json?     @map("endpoint_extra")
+  endpointActive                  Boolean   @default(true) @map("endpoint_active")
+  endpointKeyVersion              Int       @default(1) @map("endpoint_key_version")
+  endpointSuspendedAt             DateTime? @map("endpoint_suspended_at")
+  endpointSuspendReason           String    @default("") @map("endpoint_suspend_reason")
+  endpointSuspendedForEnforcement Boolean   @default(false) @map("endpoint_suspended_for_enforcement")
+  endpointRevokedAt               DateTime? @map("endpoint_revoked_at")
+  endpointRevokeReason            String    @default("") @map("endpoint_revoke_reason")
+  endpointShutdownRequired        Boolean   @default(false) @map("endpoint_shutdown_required")
+  endpointShutdownRequestedAt     DateTime? @map("endpoint_shutdown_requested_at")
+  endpointShutdownCompletedAt     DateTime? @map("endpoint_shutdown_completed_at")
+  endpointShutdownCompletedById   String?   @map("endpoint_shutdown_completed_by_id") @db.Uuid
+  endpointShutdownCompletedBy     User?     @relation("DeploymentShutdownCompletedBy", fields: [endpointShutdownCompletedById], references: [id], onDelete: SetNull)
+
+  adminNotes      String  @default("") @map("admin_notes")
+  rejectionReason String  @default("") @map("rejection_reason")
+  assignedToId    String? @map("assigned_to_id") @db.Uuid
+  assignedTo      User?   @relation("DeploymentAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  // ── timestamps for the billing engine ──
+  provisionedAt DateTime? @map("provisioned_at")
+  startedAt     DateTime? @map("started_at")
+  lastBilledAt  DateTime? @map("last_billed_at")
+  stoppedAt     DateTime? @map("stopped_at")
+  terminatedAt  DateTime? @map("terminated_at")
+
+  totalRuntimeHours Decimal @default(0) @map("total_runtime_hours") @db.Decimal(14, 4)
+  totalCost         Decimal @default(0) @map("total_cost") @db.Decimal(14, 4)
+
+  autoSuspendedForCredit      Boolean   @default(false) @map("auto_suspended_for_credit")
+  debtLimitSuspended          Boolean   @default(false) @map("debt_limit_suspended")
+  hasUnpaidStorage            Boolean   @default(false) @map("has_unpaid_storage")
+  storageDebtNotifiedAt       DateTime? @map("storage_debt_notified_at")
+  paygOfferedAt               DateTime? @map("payg_offered_at")
+  cardGateSuspended           Boolean   @default(false) @map("card_gate_suspended")
+  storageGraceWarnedAt        DateTime? @map("storage_grace_warned_at")
+  staleProvisioningNotifiedAt DateTime? @map("stale_provisioning_notified_at")
+
+  // Client-minted key so a double-click/retry lands on the same deployment.
+  // Scoped per-user, not globally unique.
+  idempotencyKey String? @map("idempotency_key")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  usage DeploymentUsage[] @relation("DeploymentUsageDeployment")
+
+  // A partial unique index on (userId, idempotencyKey) would apply only when
+  // idempotencyKey was set. No manual SQL edit needed here, unlike
+  // RecommendationPolicy.isActive below: Postgres already treats every NULL
+  // in a unique constraint as distinct from every other NULL (including other
+  // NULLs), so two rows for the same user with no idempotencyKey never
+  // conflict — a plain compound unique already gives the same
+  // behavior as long as the app keeps writing `null`, not `""`, when there is
+  // no key (matching the source schema's own `default: null`).
+  @@unique([userId, idempotencyKey])
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([modelId])
+  @@index([tierId])
+  @@map("deployments")
+}
+
+// Timestamped status-change log — a child row of its deployment.
+model DeploymentStatusHistory {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  deploymentId String     @map("deployment_id") @db.Uuid
+  deployment   Deployment @relation("DeploymentStatusHistories", fields: [deploymentId], references: [id], onDelete: Cascade)
+  order        Int        @default(0)
+
+  status DeploymentStatus
+  at     DateTime         @default(now())
+
+  byId   String? @map("by_id") @db.Uuid
+  by     User?   @relation("DeploymentStatusHistoryBy", fields: [byId], references: [id], onDelete: SetNull)
+  byName String  @default("") @map("by_name")
+  note   String  @default("")
+
+  @@index([deploymentId, order])
+  @@map("deployment_status_history")
+}
+
+// Every switch of funding method, kept as a history rather than just the
+// current value. Unlike its sibling history tables, this sub-schema was
+// declared WITHOUT `{ _id: false }` in the source, so each entry did have a
+// its own id, because it is addressed directly.
+model DeploymentBillingMethodHistory {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  deploymentId String     @map("deployment_id") @db.Uuid
+  deployment   Deployment @relation("DeploymentBillingMethodHistories", fields: [deploymentId], references: [id], onDelete: Cascade)
+  order        Int        @default(0)
+
+  method BillingMethod
+  at     DateTime      @default(now())
+
+  actorId   String? @map("actor_id") @db.Uuid
+  actor     User?   @relation("DeploymentBillingMethodHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String  @default("") @map("actor_name")
+  reason    String  @default("")
+
+  @@index([deploymentId, order])
+  @@map("deployment_billing_method_history")
+}
+
+// Answers to the admin-defined questionnaire, copied onto the deployment at
+// order time — a child row of its deployment.
+model DeploymentRequirement {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  deploymentId String     @map("deployment_id") @db.Uuid
+  deployment   Deployment @relation("DeploymentRequirements", fields: [deploymentId], references: [id], onDelete: Cascade)
+  order        Int        @default(0)
+
+  questionKey String @map("question_key")
+  question    String @default("")
+  type        String @default("text")
+  answer      Json?
+
+  @@index([deploymentId, order])
+  @@map("deployment_requirements")
+}
+
+// One hourly billing tick for a deployment. Append-only — createdAt only, no
+// updatedAt.
+model DeploymentUsage {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  deploymentId String     @map("deployment_id") @db.Uuid
+  deployment   Deployment @relation("DeploymentUsageDeployment", fields: [deploymentId], references: [id])
+
+  // The account billed.
+  teamId String @map("team_id") @db.Uuid
+  team   Team   @relation("DeploymentUsageTeam", fields: [teamId], references: [id])
+
+  // The deployment's creator, copied at billing time — per-member spend.
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation("DeploymentUsageUser", fields: [userId], references: [id])
+
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  kind   DeploymentUsageKind @default(compute)
+  status String              @default("")
+
+  hours    Decimal @db.Decimal(10, 4)
+  rate     Decimal @db.Decimal(12, 4)
+  amount   Decimal @db.Decimal(12, 4)
+  currency String  @default("USD")
+
+  // How `amount` was actually funded — split so a PAYG deployment's ledger
+  // tells the truth about where the money came from.
+  toWallet Decimal @default(0) @map("to_wallet") @db.Decimal(12, 4)
+  toDebt   Decimal @default(0) @map("to_debt") @db.Decimal(12, 4)
+
+  transactionId     String?            @map("transaction_id") @db.Uuid
+  transaction       CreditTransaction? @relation("DeploymentUsageTransaction", fields: [transactionId], references: [id], onDelete: SetNull)
+  debtTransactionId String?            @map("debt_transaction_id") @db.Uuid
+  debtTransaction   CreditTransaction? @relation("DeploymentUsageDebtTransaction", fields: [debtTransactionId], references: [id], onDelete: SetNull)
+
+  charged Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([deploymentId, periodStart(sort: Desc)])
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("deployment_usages")
+}
+
+// ============================================================================
+// ==== Admin domain ====
+// ============================================================================
+
+// Append-only — createdAt only, no updatedAt. `userId` is onDelete: Restrict:
+// an audit trail must never silently lose its link, same reasoning as
+// CreditTransaction (flagged for human review — the plan only calls this out
+// explicitly for CreditTransaction, this is an extension of that reasoning).
+// `userName`/`userEmail`/`userRole` are a deliberate denormalized snapshot.
+// `action` (~80 values) and `targetModel` (polymorphic, paired with
+// `targetId`) stay plain String per the plan; `actionType` and `status` are
+// small stable vocabularies and become real enums.
+model ActivityLog {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  userId    String @map("user_id") @db.Uuid
+  user      User   @relation("ActivityLogUser", fields: [userId], references: [id], onDelete: Restrict)
+  userName  String @map("user_name")
+  userEmail String @map("user_email")
+  userRole  String @map("user_role")
+
+  action     String
+  actionType ActivityLogActionType @map("action_type")
+
+  targetModel String? @map("target_model")
+  targetId    String? @map("target_id")
+  targetName  String? @map("target_name")
+
+  description String
+  metadata    Json?
+
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
+
+  status       ActivityLogStatus @default(success)
+  errorMessage String?           @map("error_message")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([actionType, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([targetModel, targetId])
+  @@map("activity_logs")
+}
+
+// Singleton — enforced by the `isSingleton @unique @default(true)` pattern
+// below, a real DB-enforced at-most-one-row guarantee replacing today's
+// app-only `getSettings()` convention. Each config section collapses to one
+// Json column; `activePaymentGateway` stays its own enum column since app
+// code branches on it directly (see the pinned admin-center-controlled-
+// features note — this is the field that switches Stripe vs LemonSqueezy
+// platform-wide). Section columns are nullable Json — the app is expected to
+// populate them with the shipped defaults the first time the singleton row
+// is created, mirroring today's `getSettings()` seeding behavior.
+model AdminSettings {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  isSingleton Boolean @unique @default(true) @map("is_singleton")
+
+  themeSettings Json? @map("theme_settings")
+
+  siteName        String @default("My Platform") @map("site_name")
+  siteDescription String @default("AI-powered platform") @map("site_description")
+  supportEmail    String @default("support@example.com") @map("support_email")
+  contactEmail    String @default("contact@example.com") @map("contact_email")
+
+  emailSettings        Json? @map("email_settings")
+  emailTemplates       Json? @map("email_templates")
+  customerSettings     Json? @map("customer_settings")
+  securitySettings     Json? @map("security_settings")
+  analyticsSettings    Json? @map("analytics_settings")
+  notificationSettings Json? @map("notification_settings")
+  stripeSettings       Json? @map("stripe_settings")
+  lemonSqueezySettings Json? @map("lemon_squeezy_settings")
+  polarSettings        Json? @map("polar_settings")
+
+  activePaymentGateway PaymentGateway @default(stripe) @map("active_payment_gateway")
+
+  maintenanceMode    Json? @map("maintenance_mode")
+  seoSettings        Json? @map("seo_settings")
+  billingSettings    Json? @map("billing_settings")
+  deploymentSettings Json? @map("deployment_settings")
+  features           Json?
+  googleSSOSettings  Json? @map("google_sso_settings")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_settings")
+}
+
+model BlogPost {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  title         String
+  slug          String @unique
+  excerpt       String @default("")
+  content       String @default("")
+  featuredImage String @default("") @map("featured_image")
+
+  authorId   String? @map("author_id") @db.Uuid
+  author     User?   @relation("BlogPostAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  authorName String  @default("Admin") @map("author_name")
+
+  category String   @default("General")
+  tags     String[] @default([])
+
+  status      PublishStatus @default(draft)
+  publishedAt DateTime?     @map("published_at")
+  views       Int           @default(0)
+  isFeatured  Boolean       @default(false) @map("is_featured")
+
+  seoTitle       String  @default("") @map("seo_title")
+  seoDescription String  @default("") @map("seo_description")
+  ogImage        String  @default("") @map("og_image")
+  canonicalUrl   String  @default("") @map("canonical_url")
+  noIndex        Boolean @default(false) @map("no_index")
+
+  readTime Int @default(0) @map("read_time")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([category])
+  @@index([tags])
+  @@index([views(sort: Desc)])
+  // There is no full-text index on title/content/tags. Confirm actual
+  // query usage before deciding the Postgres equivalent (tsvector+GIN column
+  // vs plain ILIKE, matching the rest of this app's search) — see plan Phase 5.
+  @@map("blog_posts")
+}
+
+model CronJob {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  key           String @unique
+  name          String
+  description   String @default("")
+  schedule      String
+  scheduleLabel String @default("") @map("schedule_label")
+
+  actionType CronActionType @default(log) @map("action_type")
+
+  // httpConfig{} flattened
+  httpConfigUrl     String     @default("") @map("http_config_url")
+  httpConfigMethod  HttpMethod @default(GET) @map("http_config_method")
+  httpConfigHeaders Json?      @map("http_config_headers")
+  httpConfigBody    String     @default("") @map("http_config_body")
+
+  logMessage String @default("Custom cron job executed") @map("log_message")
+
+  // emailConfig{} flattened
+  emailConfigTo      String @default("") @map("email_config_to")
+  emailConfigSubject String @default("") @map("email_config_subject")
+  emailConfigBody    String @default("") @map("email_config_body")
+
+  // cleanupConfig{} flattened
+  cleanupConfigTarget        CronCleanupTarget @default(activityLogs) @map("cleanup_config_target")
+  cleanupConfigOlderThanDays Int               @default(30) @map("cleanup_config_older_than_days")
+
+  // notificationConfig{} flattened — notificationType kept String (not enum)
+  // to stay a valid value of Notification.type's own larger String vocabulary
+  notificationConfigTitle   String @default("") @map("notification_config_title")
+  notificationConfigMessage String @default("") @map("notification_config_message")
+  notificationConfigType    String @default("system_alert") @map("notification_config_type")
+
+  // backupConfig{} flattened
+  backupConfigCollections String[] @default([]) @map("backup_config_collections")
+  backupConfigOutputDir   String   @default("backups") @map("backup_config_output_dir")
+
+  enabled    Boolean         @default(true)
+  lastRun    DateTime?       @map("last_run")
+  lastStatus CronLastStatus? @map("last_status")
+  lastError  String?         @map("last_error")
+  runCount   Int             @default(0) @map("run_count")
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("CronJobCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("cron_jobs")
+}
+
+model CustomerNote {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  customerId String @map("customer_id") @db.Uuid
+  customer   User   @relation("CustomerNoteCustomer", fields: [customerId], references: [id])
+
+  // Nullable + SetNull so deleting the admin who wrote a note doesn't make that
+  // admin undeletable. The note survives and stays readable — `authorName` is
+  // denormalised here precisely so it doesn't depend on the user row.
+  authorId   String? @map("author_id") @db.Uuid
+  author     User?   @relation("CustomerNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  authorName String  @map("author_name")
+
+  text String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([customerId, createdAt(sort: Desc)])
+  @@map("customer_notes")
+}
+
+model Department {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name        String  @unique
+  value       String  @unique
+  description String?
+  isActive    Boolean @default(true) @map("is_active")
+  isDefault   Boolean @default(false) @map("is_default")
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("DepartmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("DepartmentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([value])
+  @@index([isActive])
+  @@map("departments")
+}
+
+model DeploymentJourney {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  key         String @unique
+  name        String
+  description String @default("")
+
+  mode JourneyMode @default(model_first)
+
+  steps DeploymentJourneyStep[] @relation("DeploymentJourneySteps")
+
+  // settings{} flattened — small fixed-shape nested object
+  settingsAutoAdvance             Boolean @default(true) @map("settings_auto_advance")
+  settingsAutoAdvanceDelayMs      Int     @default(350) @map("settings_auto_advance_delay_ms")
+  settingsShowLiveSizing          Boolean @default(true) @map("settings_show_live_sizing")
+  settingsShowProgressBar         Boolean @default(true) @map("settings_show_progress_bar")
+  settingsAllowBack               Boolean @default(true) @map("settings_allow_back")
+  settingsShowEstimatedCost       Boolean @default(true) @map("settings_show_estimated_cost")
+  settingsAllowManualTierOverride Boolean @default(true) @map("settings_allow_manual_tier_override")
+  settingsModelMatchLimit         Int     @default(5) @map("settings_model_match_limit")
+  settingsRequireAllRequired      Boolean @default(true) @map("settings_require_all_required")
+  settingsCompletionMessage       String  @default("") @map("settings_completion_message")
+
+  isDefault    Boolean @default(false) @map("is_default")
+  isActive     Boolean @default(true) @map("is_active")
+  displayOrder Int     @default(0) @map("display_order")
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("DeploymentJourneyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("DeploymentJourneyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([mode, isDefault])
+  @@index([displayOrder])
+  @@map("deployment_journeys")
+}
+
+// `{ _id: true }` explicit in the source (unlike its sibling embedded
+// schemas) — the admin builder needs a stable per-step handle for
+// reordering, same choice MarketingPage makes for its content blocks. Hence
+
+model DeploymentJourneyStep {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  journeyId String            @map("journey_id") @db.Uuid
+  journey   DeploymentJourney @relation("DeploymentJourneySteps", fields: [journeyId], references: [id], onDelete: Cascade)
+  order     Int               @default(0)
+
+  key  String
+  type JourneyStepType
+
+  title    String @default("")
+  subtitle String @default("")
+  body     String @default("")
+  ctaLabel String @default("") @map("cta_label")
+  icon     String @default("")
+  image    String @default("")
+
+  // Soft references to QuestionTemplate.key — never a real FK
+  questionKeys String[] @default([]) @map("question_keys")
+
+  // dependsOn{} flattened — same shape as QuestionTemplate.dependsOn
+  dependsOnQuestionKey String @default("") @map("depends_on_question_key")
+  dependsOnEquals      Json?  @map("depends_on_equals")
+
+  // Per-step overrides, shape varies by step type
+  settings Json?
+
+  skippable    Boolean @default(false)
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  @@index([journeyId, order])
+  @@map("deployment_journey_steps")
+}
+
+model MarketingPage {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  title       String
+  slug        String @unique
+  description String @default("")
+
+  metaTitle       String  @default("") @map("meta_title")
+  metaDescription String  @default("") @map("meta_description")
+  metaKeywords    String  @default("") @map("meta_keywords")
+  ogImage         String  @default("") @map("og_image")
+  canonicalUrl    String  @default("") @map("canonical_url")
+  noIndex         Boolean @default(false) @map("no_index")
+
+  status PublishStatus @default(draft)
+
+  isHomePage       Boolean @default(false) @map("is_home_page")
+  showInNavigation Boolean @default(true) @map("show_in_navigation")
+  navigationOrder  Int     @default(0) @map("navigation_order")
+  navigationLabel  String  @default("") @map("navigation_label")
+
+  blocks MarketingPageBlock[] @relation("MarketingPageBlocks")
+
+  customCSS String @default("") @map("custom_css")
+
+  lastEditedById String? @map("last_edited_by_id") @db.Uuid
+  lastEditedBy   User?   @relation("MarketingPageLastEditedBy", fields: [lastEditedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([slug, status])
+  @@index([showInNavigation, navigationOrder])
+  @@map("marketing_pages")
+}
+
+// Addressed directly, so it carries its own id. The
+// source's own `order` field already IS the array-position column (rule #5),
+// so no separate synthetic column is added on top of it. `items` stays Json:
+// item shape varies per block type and is rendered generically by the
+// frontend — not worth a second child table (per plan).
+model MarketingPageBlock {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  pageId String        @map("page_id") @db.Uuid
+  page   MarketingPage @relation("MarketingPageBlocks", fields: [pageId], references: [id], onDelete: Cascade)
+
+  order Int @default(0)
+
+  type MarketingBlockType
+
+  title               String @default("")
+  subtitle            String @default("")
+  content             String @default("")
+  buttonText          String @default("") @map("button_text")
+  buttonLink          String @default("") @map("button_link")
+  secondaryButtonText String @default("") @map("secondary_button_text")
+  secondaryButtonLink String @default("") @map("secondary_button_link")
+  backgroundImage     String @default("") @map("background_image")
+  backgroundColor     String @default("") @map("background_color")
+  textColor           String @default("") @map("text_color")
+
+  items Json?
+
+  visible  Boolean @default(true)
+  settings Json?
+
+  @@index([pageId, order])
+  @@map("marketing_page_blocks")
+}
+
+// `options[]` and `signalRules[]` stay Json per the plan — 3-4 levels deep,
+// shape varies by question type, never queried relationally. This is also
+// where the deeply-nested `signalSchema` (min/max hardware floors, use-case
+// preference weights, scoring nudges) lives, folded into whichever of the
+// two Json blobs it appears under.
+model QuestionTemplate {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  key         String @unique
+  question    String
+  helpText    String @default("") @map("help_text")
+  placeholder String @default("")
+
+  type QuestionType @default(select)
+
+  options     Json?
+  signalRules Json? @map("signal_rules")
+
+  // Derived in the app from the signals actually present — never trusted
+  // from the client.
+  affectsSizing Boolean @default(false) @map("affects_sizing")
+
+  required     Boolean @default(false)
+  defaultValue Json?   @map("default_value")
+
+  // appliesTo{} flattened. `modelIds` was a real ObjectId-ref array in
+  // a real relation (unlike this app's usual soft string references) — kept as a
+  // plain String[] with no relation constraint for now; flagged for human
+  // review, see the migration report.
+  appliesToAllModels  Boolean  @default(true) @map("applies_to_all_models")
+  appliesToModelIds   String[] @default([]) @map("applies_to_model_ids")
+  appliesToModalities String[] @default([]) @map("applies_to_modalities")
+
+  // dependsOn{} flattened
+  dependsOnQuestionKey String @default("") @map("depends_on_question_key")
+  dependsOnEquals      Json?  @map("depends_on_equals")
+
+  displayOrder Int     @default(0) @map("display_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("QuestionTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("QuestionTemplateUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@index([displayOrder])
+  @@index([affectsSizing])
+  @@map("question_templates")
+}
+
+// How the recommendation engine makes up its mind. Deliberately dumb
+// storage: every nested tuning block (modelRanking/tierScoring/suitability/
+// confidence/matchReasonLimits) and every open-vocabulary weight/template map
+// collapses to its own Json column — the engine deep-merges whatever is set
+// over services/recommendation/policyDefaults.js, so a policy that overrides
+// one field never blanks out the rest, and a policy written before a new
+// knob existed keeps working. Flagged for human review: the defined-shape
+// nested sections (modelRanking etc.) have a fixed shape, so a
+// stricter reading of the plan's rules could flatten them into dozens of
+// individual columns instead — Json was chosen here because they are
+// single-purpose tuning blobs never queried relationally, read/written only
+// as a whole by the recommendation engine, much like AdminSettings' sections.
+model RecommendationPolicy {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  key         String @unique
+  name        String
+  description String @default("")
+
+  // "Exactly one active" used to be enforced in application code. Prisma's
+  // schema DSL cannot express a partial unique index directly, so this is
+  // enforced by a hand-written partial unique index instead (migration
+  // 20260906114845_recommendation_policy_single_active) rather than here.
+  isActive Boolean @default(false) @map("is_active")
+
+  modelRanking Json? @map("model_ranking")
+  tierScoring  Json? @map("tier_scoring")
+  suitability  Json?
+
+  fitWeights     Json? @map("fit_weights")
+  uptimeRanks    Json? @map("uptime_ranks")
+  confidence     Json?
+  modalityLabels Json? @map("modality_labels")
+
+  reasonTemplates      Json? @map("reason_templates")
+  suitabilityTemplates Json? @map("suitability_templates")
+  tierIssueTemplates   Json? @map("tier_issue_templates")
+  matchReasonTemplates Json? @map("match_reason_templates")
+  alternativeTemplates Json? @map("alternative_templates")
+  blockerTemplates     Json? @map("blocker_templates")
+
+  matchReasonLimits Json? @map("match_reason_limits")
+
+  cacheTtlSeconds Int? @map("cache_ttl_seconds")
+
+  updatedById String? @map("updated_by_id") @db.Uuid
+  updatedBy   User?   @relation("RecommendationPolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("recommendation_policies")
+}
+
+model SeoRedirect {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  fromPath String @unique @map("from_path")
+  toPath   String @map("to_path")
+
+  // Allowed values validated in app code: 301, 302, 307, 308.
+  statusCode Int @default(301) @map("status_code")
+
+  isActive  Boolean   @default(true) @map("is_active")
+  hitCount  Int       @default(0) @map("hit_count")
+  lastHitAt DateTime? @map("last_hit_at")
+  note      String    @default("")
+
+  createdById String? @map("created_by_id") @db.Uuid
+  createdBy   User?   @relation("SeoRedirectCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("seo_redirects")
+}

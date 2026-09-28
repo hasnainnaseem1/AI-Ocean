@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<!--
+  `lang` and `dir` are set by the inline script below rather than written here,
+  because a returning Urdu or Arabic customer would otherwise see one frame of
+  left-to-right layout before React boots and visibly snap.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <script>
+      // Runs before any stylesheet or bundle: read the language this browser
+      // last used and stamp the document with it. LanguageContext writes the
+      // same key (cc_lang) and is the authority from then on; this only
+      // prevents the flash. Wrapped because private-mode browsers throw on
+      // localStorage access.
+      (function () {
+        try {
+          var lang = localStorage.getItem('cc_lang');
+          if (!lang) return;
+          var rtl = { ur: 1, ar: 1, fa: 1, he: 1 };
+          document.documentElement.setAttribute('lang', lang);
+          document.documentElement.setAttribute('dir', rtl[lang.split('-')[0]] ? 'rtl' : 'ltr');
+        } catch (e) { /* no stored preference reachable — English it is */ }
+      })();
+    </script>
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#F5F7FD" />
+    <meta name="description" content="AI Ocean - Deployment Dashboard" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+    <title>AI Ocean - Dashboard</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>

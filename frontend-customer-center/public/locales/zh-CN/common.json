@@ -1,0 +1,90 @@
+{
+  "language": {
+    "switcherLabel": "语言",
+    "chooseTitle": "要使用{{language}}吗？",
+    "chooseBody": "我们注意到您可能更习惯{{language}}。您随时可以在语言菜单中更改。",
+    "keepEnglish": "继续使用英文",
+    "useSuggested": "切换到{{language}}",
+    "saveFailed": "无法保存您的语言选择。本次已生效，下次登录时我们会再试一次。",
+    "defaultTag": "默认"
+  },
+  "units": {
+    "hourShort": "小时",
+    "perHour": "/小时",
+    "perMonth": "/月",
+    "perDay": "/天"
+  },
+  "duration": {
+    "underAMinute": "不到一分钟",
+    "minutes_other": "{{count}} 分钟",
+    "hoursOnly": "{{hours}} 小时",
+    "hoursMinutes": "{{hours}} 小时 {{minutes}} 分"
+  },
+  "emptyBalance": {
+    "stoppedTitle": "您的余额已用完，预付费部署已停止",
+    "paygTitle": "您的余额为零 — 当前用量由按量付费承担",
+    "emptyTitle": "您的余额为零",
+    "stoppedBody": "请充值以重新启动，或将其切换为按量付费 — 按量付费会保持运行并在事后结算。",
+    "willStopBody": "如果不充值，您的预付费部署将在下次计费时停止。",
+    "paygBody": "您的按量付费部署仍在运行 — 这段时间同样会计费，并计入您的欠款。",
+    "owed": "您当前欠款 {{amount}}。",
+    "cardRequired": "本平台还要求先绑定一张已验证的银行卡，才能重新启动任何部署。",
+    "addCard": "添加银行卡",
+    "addCredit": "充值",
+    "limitTitle": "已达到按量付费额度 — 您的部署已暂停",
+    "limitBody": "您欠款 {{owed}}，超出 {{limit}} 的额度 {{over}}，因此您的按量付费部署已暂停。",
+    "limitResume": "充值使欠款回到额度以内 — 部署会自动恢复。",
+    "tooOldTitle": "付款逾期 — 您的部署已暂停",
+    "tooOldBody_other": "您 {{amount}} 的欠款已 {{count}} 天未付，超过允许的 {{max}} 天，因此您的按量付费部署已暂停。",
+    "tooOldResume": "请全额付清 — 部署会自动恢复。",
+    "pausedDiskCharged": "暂停的部署会保留磁盘，存储仍在计费：每天 {{amount}}，计入您的欠款。"
+  },
+  "status": {
+    "pending_review": "待审核",
+    "approved": "已通过",
+    "rejected": "已拒绝",
+    "provisioning": "配置中",
+    "running": "运行中",
+    "paused": "已暂停",
+    "stopped": "已停止",
+    "failed": "失败",
+    "terminated": "已终止"
+  },
+  "action": {
+    "pause": "暂停",
+    "resume": "恢复",
+    "stop": "停止",
+    "terminate": "终止",
+    "close": "关闭",
+    "refresh": "刷新",
+    "done": "完成",
+    "hide": "隐藏",
+    "reveal": "显示",
+    "addCredit": "充值",
+    "addCard": "添加银行卡",
+    "browseModels": "浏览模型",
+    "newDeployment": "新建部署",
+    "cancel": "取消",
+    "edit": "编辑",
+    "retry": "重试",
+    "save": "保存"
+  },
+  "label": {
+    "total": "合计",
+    "rate": "费率",
+    "status": "状态",
+    "actions": "操作",
+    "model": "模型",
+    "region": "区域",
+    "hours": "小时数",
+    "charge": "费用",
+    "current": "当前",
+    "running": "运行中",
+    "storage": "存储",
+    "compute": "算力",
+    "name": "名称"
+  },
+  "error": {
+    "network": "网络错误，请重试。"
+  }
+}

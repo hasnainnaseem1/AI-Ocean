@@ -1,0 +1,58 @@
+{
+  "list": {
+    "title": "Support Tickets",
+    "subtitle": "Your support requests and their status.",
+    "newTicket": "New ticket",
+    "total": "Total",
+    "totalCaption": "All requests you've raised",
+    "awaiting": "Awaiting",
+    "awaitingCaption": "Open or pending a response",
+    "solved": "Solved",
+    "solvedCaption": "Resolved requests",
+    "searchPlaceholder": "Search tickets…",
+    "empty": "You haven't raised any support tickets yet",
+    "ticketId": "Ticket ID",
+    "created": "Created",
+    "totalTickets": "Total\ntickets",
+    "awaitingReply": "Awaiting\nreply",
+    "solvedTickets": "Solved\ntickets"
+  },
+  "form": {
+    "title": "New support ticket",
+    "submit": "Submit ticket",
+    "subject": "Subject",
+    "subjectPlaceholder": "e.g. Deployment stuck in provisioning",
+    "subjectRequired": "Give your ticket a short subject",
+    "category": "Category",
+    "message": "Message",
+    "messagePlaceholder": "Describe the issue in as much detail as you can…",
+    "messageRequired": "Describe what you need help with"
+  },
+  "reply": {
+    "notFound": "Ticket not found",
+    "removed": "This ticket may have been removed.",
+    "back": "Back to tickets",
+    "noReplyYet": "Our support team hasn't replied yet — you'll see their response here.",
+    "placeholder": "Type your reply here…",
+    "attachSoon": "Attachments coming soon",
+    "attach": "Attach",
+    "send": "Reply",
+    "supportTeam": "Support team",
+    "details": "Ticket details",
+    "customer": "Customer",
+    "email": "Email",
+    "reopen": "Reopen ticket",
+    "markResolved": "Mark as resolved"
+  },
+  "status": {
+    "open": "Open",
+    "pending": "Pending",
+    "solved": "Solved"
+  },
+  "category": {
+    "general": "General support",
+    "billing": "Billing",
+    "technical": "Technical issue",
+    "deployment": "Deployment issue"
+  }
+}

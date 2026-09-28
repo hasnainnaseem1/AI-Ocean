@@ -1,0 +1,218 @@
+/**
+ * DateTimeRangePicker Component - Usage Examples
+ * 
+ * This is a reusable date-time range picker component that can be used
+ * throughout the application for consistent date-time selection.
+ */
+
+// ============================================
+// Example 1: Basic Usage with AM/PM (Default)
+// ============================================
+import DateTimeRangePicker from '../../components/common/DateTimeRangePicker';
+
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={setDateRange}
+    />
+  );
+};
+
+// ============================================
+// Example 2: 24-Hour Format
+// ============================================
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={setDateRange}
+      use24HourFormat={true}
+    />
+  );
+};
+
+// ============================================
+// Example 3: Custom Placeholder
+// ============================================
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={setDateRange}
+      placeholder={['From', 'To']}
+    />
+  );
+};
+
+// ============================================
+// Example 4: Large Size with Custom Style
+// ============================================
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={setDateRange}
+      size="large"
+      style={{ width: '400px' }}
+    />
+  );
+};
+
+// ============================================
+// Example 5: Date Only (No Time)
+// ============================================
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={setDateRange}
+      showTime={false}
+      format="DD/MM/YYYY"
+    />
+  );
+};
+
+// ============================================
+// Example 6: Disable Past Dates
+// ============================================
+import dayjs from 'dayjs';
+
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+
+  const disablePastDates = (current) => {
+    return current && current < dayjs().startOf('day');
+  };
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={setDateRange}
+      disabledDate={disablePastDates}
+    />
+  );
+};
+
+// ============================================
+// Example 7: With Clear Handler
+// ============================================
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+
+  const handleDateChange = (dates) => {
+    setDateRange(dates);
+    if (!dates) {
+      console.log('Date range cleared');
+      // Reset filters or fetch all data
+    }
+  };
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={handleDateChange}
+      allowClear={true}
+    />
+  );
+};
+
+// ============================================
+// Example 8: Small Size for Compact UI
+// ============================================
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={setDateRange}
+      size="small"
+    />
+  );
+};
+
+// ============================================
+// Example 9: Disabled State
+// ============================================
+const MyComponent = () => {
+  const [dateRange, setDateRange] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  return (
+    <DateTimeRangePicker
+      value={dateRange}
+      onChange={setDateRange}
+      disabled={isLoading}
+    />
+  );
+};
+
+// ============================================
+// Example 10: Full Featured (Activity Log Filter)
+// ============================================
+const ActivityLogPage = () => {
+  const [activityDateRange, setActivityDateRange] = useState(null);
+  const [filteredLogs, setFilteredLogs] = useState([]);
+
+  useEffect(() => {
+    if (!activityDateRange || activityDateRange.length !== 2) {
+      setFilteredLogs(allLogs); // Show all
+      return;
+    }
+    
+    const [start, end] = activityDateRange;
+    const filtered = allLogs.filter((log) => {
+      const logDate = new Date(log.createdAt);
+      return logDate >= start.toDate() && logDate <= end.toDate();
+    });
+    
+    setFilteredLogs(filtered);
+  }, [activityDateRange]);
+
+  return (
+    <div>
+      <Space direction="vertical" style={{ width: '100%', marginBottom: 16 }}>
+        <Text type="secondary">FILTER BY DATE RANGE</Text>
+        <DateTimeRangePicker
+          value={activityDateRange}
+          onChange={setActivityDateRange}
+          placeholder={['Start Date & Time', 'End Date & Time']}
+        />
+      </Space>
+      
+      {/* Display filtered logs */}
+      {filteredLogs.map(log => (
+        <div key={log.id}>{log.description}</div>
+      ))}
+    </div>
+  );
+};
+
+// ============================================
+// Props Reference
+// ============================================
+/**
+ * @prop {Array} value - Current value (array of 2 dayjs objects)
+ * @prop {Function} onChange - Callback when value changes (required)
+ * @prop {String} format - Date-time format (default: 'DD/MM/YYYY hh:mm A')
+ * @prop {Boolean} use24HourFormat - Use 24-hour instead of 12-hour (default: false)
+ * @prop {Boolean} showTime - Show time selection (default: true)
+ * @prop {Array} placeholder - Placeholder text for inputs (default: ['Start Date & Time', 'End Date & Time'])
+ * @prop {Object} style - Custom styles (default: { width: '100%' })
+ * @prop {String} size - Input size: 'small', 'middle', 'large' (default: 'middle')
+ * @prop {Boolean} allowClear - Allow clearing selection (default: true)
+ * @prop {Boolean} disabled - Disable the picker (default: false)
+ * @prop {Function} disabledDate - Function to disable specific dates
+ * @prop {Boolean} showNow - Show 'Now' button (default: true)
+ */

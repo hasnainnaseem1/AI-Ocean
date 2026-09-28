@@ -1,0 +1,39 @@
+{
+  "section": {
+    "infrastructure": "इंफ़्रास्ट्रक्चर",
+    "support": "सपोर्ट"
+  },
+  "item": {
+    "overview": "अवलोकन",
+    "models": "मॉडल",
+    "machineTypes": "मशीन के प्रकार",
+    "deployments": "डिप्लॉयमेंट्स",
+    "supportTicket": "सपोर्ट टिकट",
+    "myProfile": "मेरी प्रोफ़ाइल",
+    "usageLimits": "उपयोग सीमाएँ",
+    "billing": "बिलिंग"
+  },
+  "badge": {
+    "new": "नया"
+  },
+  "sidebar": {
+    "open": "साइडबार खोलें",
+    "close": "साइडबार बंद करें"
+  },
+  "header": {
+    "searchPlaceholder": "मॉडल खोजें…",
+    "lightMode": "लाइट मोड",
+    "darkMode": "डार्क मोड"
+  },
+  "account": {
+    "signOut": "साइन आउट"
+  },
+  "chat": {
+    "title": "सपोर्ट चैट",
+    "subtitle": "हम आमतौर पर कुछ घंटों में जवाब देते हैं",
+    "placeholder": "संदेश लिखें…",
+    "notConnected": "चैट अभी जुड़ी नहीं है",
+    "open": "सपोर्ट चैट",
+    "close": "चैट बंद करें"
+  }
+}

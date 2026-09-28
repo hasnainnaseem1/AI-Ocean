@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -)",
+      "Bash(node -e \"require\\('./routes/v1/admin/customers.routes.js'\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(node shot-compare.js)",
+      "Bash(npx react-scripts *)",
+      "Bash(node shot23.js)",
+      "Bash(node journey.js)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(curl -s -o /dev/null -w \"journey route: %{http_code}\\\\n\" \"http://localhost:3001/api/v1/customer/deployments/journey\")",
+      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process -Filter \"Name='\\\\''node.exe'\\\\''\" | Select-Object ProcessId,@{n='\\\\''Cmd'\\\\'';e={$_.CommandLine.Substring\\(0,[Math]::Min\\(110,$_.CommandLine.Length\\)\\)}} | Format-Table -AutoSize | Out-String -Width 200')",
+      "Bash(node journey2.js)",
+      "Bash(node repro2.js)",
+      "Bash(node --check journey2.js)",
+      "Bash(node verify2fixes_c.js)",
+      "Bash(node --check src/services/deployment/deploymentService.js)",
+      "Bash(node --check src/controllers/customer/paymentMethodController.js)",
+      "Bash(npm test *)",
+      "Bash(powershell -Command \"Stop-Process -Id 26640 -Force\")",
+      "Bash(nohup node src/server.js)",
+      "Bash(curl -s -m 3 -o /dev/null -w \"backend:%{http_code}\\\\n\" http://localhost:3001/api/v1/customer/wallet)",
+      "Read(//tmp/**)",
+      "Bash(grep -A 5 \"^src\\\\\\\\\\\\\\\\pages\\\\\\\\\\\\\\\\SettingsPage.js$\")",
+      "Read(//c/Users/HASNAI~1/AppData/Local/Temp/claude/e--Startup-Claude-AI-AI-Ocean/38dd5c41-b003-4185-a6d7-add91a38b476/scratchpad/pw/**)",
+      "Bash(node -e \"console.log\\(require\\('playwright-core/package.json'\\).version\\); const {chromium}=require\\('playwright-core'\\); console.log\\(chromium.executablePath\\(\\)\\)\")",
+      "Bash(rm -rf \"e:\\\\Startup\\\\Claude_AI\\\\AI-Ocean\\\\frontend-admin-center\\\\build\" /tmp/build_batch3.log)",
+      "Bash(node phase7-debug.js)",
+      "Bash(npm install *)",
+      "Bash(python3 -c ' *)",
+      "Bash(npx prisma *)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

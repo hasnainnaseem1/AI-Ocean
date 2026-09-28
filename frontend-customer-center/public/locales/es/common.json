@@ -1,0 +1,93 @@
+{
+  "language": {
+    "switcherLabel": "Idioma",
+    "chooseTitle": "¿Quieres usar {{language}}?",
+    "chooseBody": "Parece que prefieres {{language}}. Puedes cambiarlo cuando quieras desde el menú de idioma.",
+    "keepEnglish": "Continuar en inglés",
+    "useSuggested": "Cambiar a {{language}}",
+    "saveFailed": "No hemos podido guardar tu elección de idioma. Se ha aplicado aquí y lo volveremos a intentar la próxima vez que inicies sesión.",
+    "defaultTag": "Predeterminado"
+  },
+  "units": {
+    "hourShort": "h",
+    "perHour": "/h",
+    "perMonth": "/mes",
+    "perDay": "/día"
+  },
+  "duration": {
+    "underAMinute": "menos de un minuto",
+    "minutes_one": "{{count}} min",
+    "minutes_other": "{{count}} min",
+    "hoursOnly": "{{hours}} h",
+    "hoursMinutes": "{{hours}} h {{minutes}} min"
+  },
+  "emptyBalance": {
+    "stoppedTitle": "Tu saldo se agotó y los despliegues de prepago se detuvieron",
+    "paygTitle": "Tu saldo está a cero: el pago por uso está cubriendo tu consumo",
+    "emptyTitle": "Tu saldo está a cero",
+    "stoppedBody": "Añade saldo para volver a iniciarlos, o pásalos a pago por uso, que los mantiene en marcha y te factura después.",
+    "willStopBody": "Tus despliegues de prepago se detendrán en la próxima facturación si no añades saldo.",
+    "paygBody": "Tus despliegues de pago por uso siguen en marcha: ese tiempo también se cobra y se suma a tu importe pendiente.",
+    "owed": "Actualmente debes {{amount}}.",
+    "cardRequired": "Esta plataforma también exige una tarjeta verificada antes de que algo pueda volver a arrancar.",
+    "addCard": "Añadir una tarjeta",
+    "addCredit": "Añadir saldo",
+    "limitTitle": "Límite de pago por uso alcanzado: tus despliegues están en pausa",
+    "limitBody": "Debes {{owed}}, {{over}} por encima de tu límite de {{limit}}, así que tus despliegues de pago por uso se han pausado.",
+    "limitResume": "Añade crédito para volver a quedar por debajo del límite; se reanudarán automáticamente.",
+    "tooOldTitle": "Pago vencido: tus despliegues están en pausa",
+    "tooOldBody_one": "Tu saldo pendiente de {{amount}} lleva {{count}} día sin pagarse, más de los {{max}} días permitidos, así que tus despliegues de pago por uso se han pausado.",
+    "tooOldBody_many": "Tu saldo pendiente de {{amount}} lleva {{count}} días sin pagarse, más de los {{max}} días permitidos, así que tus despliegues de pago por uso se han pausado.",
+    "tooOldBody_other": "Tu saldo pendiente de {{amount}} lleva {{count}} días sin pagarse, más de los {{max}} días permitidos, así que tus despliegues de pago por uso se han pausado.",
+    "tooOldResume": "Págalo por completo; se reanudarán automáticamente.",
+    "pausedDiskCharged": "Los despliegues en pausa conservan sus discos y ese almacenamiento se sigue cobrando: {{amount}} al día, que se suman a lo que debes."
+  },
+  "status": {
+    "pending_review": "Pendiente de revisión",
+    "approved": "Aprobado",
+    "rejected": "Rechazado",
+    "provisioning": "Aprovisionando",
+    "running": "En marcha",
+    "paused": "Pausado",
+    "stopped": "Detenido",
+    "failed": "Fallido",
+    "terminated": "Eliminado"
+  },
+  "action": {
+    "pause": "Pausar",
+    "resume": "Reanudar",
+    "stop": "Detener",
+    "terminate": "Eliminar",
+    "close": "Cerrar",
+    "refresh": "Actualizar",
+    "done": "Hecho",
+    "hide": "Ocultar",
+    "reveal": "Mostrar",
+    "addCredit": "Añadir saldo",
+    "addCard": "Añadir una tarjeta",
+    "browseModels": "Explorar modelos",
+    "newDeployment": "Nuevo despliegue",
+    "cancel": "Cancelar",
+    "edit": "Editar",
+    "retry": "Reintentar",
+    "save": "Guardar"
+  },
+  "label": {
+    "total": "Total",
+    "rate": "Tarifa",
+    "status": "Estado",
+    "actions": "Acciones",
+    "model": "Modelo",
+    "region": "Región",
+    "hours": "Horas",
+    "charge": "Importe",
+    "current": "Actual",
+    "running": "En marcha",
+    "storage": "Almacenamiento",
+    "compute": "Cómputo",
+    "name": "Nombre"
+  },
+  "error": {
+    "network": "Error de red. Inténtalo de nuevo."
+  }
+}

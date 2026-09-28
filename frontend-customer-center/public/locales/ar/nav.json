@@ -1,0 +1,39 @@
+{
+  "section": {
+    "infrastructure": "البنية التحتية",
+    "support": "الدعم"
+  },
+  "item": {
+    "overview": "نظرة عامة",
+    "models": "النماذج",
+    "machineTypes": "أنواع الأجهزة",
+    "deployments": "عمليات النشر",
+    "supportTicket": "تذكرة دعم",
+    "myProfile": "ملفي الشخصي",
+    "usageLimits": "حدود الاستخدام",
+    "billing": "الفوترة"
+  },
+  "badge": {
+    "new": "جديد"
+  },
+  "sidebar": {
+    "open": "فتح الشريط الجانبي",
+    "close": "إغلاق الشريط الجانبي"
+  },
+  "header": {
+    "searchPlaceholder": "ابحث في النماذج…",
+    "lightMode": "الوضع الفاتح",
+    "darkMode": "الوضع الداكن"
+  },
+  "account": {
+    "signOut": "تسجيل الخروج"
+  },
+  "chat": {
+    "title": "محادثة الدعم",
+    "subtitle": "نرد عادةً خلال ساعات قليلة",
+    "placeholder": "اكتب رسالة…",
+    "notConnected": "المحادثة غير متصلة بعد",
+    "open": "محادثة الدعم",
+    "close": "إغلاق المحادثة"
+  }
+}

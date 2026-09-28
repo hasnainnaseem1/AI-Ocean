@@ -1,0 +1,58 @@
+{
+  "list": {
+    "title": "تذاكر الدعم",
+    "subtitle": "طلبات الدعم الخاصة بك وحالتها.",
+    "newTicket": "تذكرة جديدة",
+    "total": "الإجمالي",
+    "totalCaption": "كل الطلبات التي أرسلتها",
+    "awaiting": "قيد الانتظار",
+    "awaitingCaption": "مفتوحة أو بانتظار رد",
+    "solved": "تم حلها",
+    "solvedCaption": "الطلبات التي تمت معالجتها",
+    "searchPlaceholder": "ابحث في التذاكر…",
+    "empty": "لم ترسل أي تذكرة دعم بعد",
+    "ticketId": "رقم التذكرة",
+    "created": "تاريخ الإنشاء",
+    "totalTickets": "إجمالي\nالتذاكر",
+    "awaitingReply": "بانتظار\nالرد",
+    "solvedTickets": "التذاكر\nالمحلولة"
+  },
+  "form": {
+    "title": "تذكرة دعم جديدة",
+    "submit": "إرسال التذكرة",
+    "subject": "الموضوع",
+    "subjectPlaceholder": "مثال: النشر متوقف في مرحلة التجهيز",
+    "subjectRequired": "اكتب موضوعاً مختصراً لتذكرتك",
+    "category": "الفئة",
+    "message": "الرسالة",
+    "messagePlaceholder": "اشرح المشكلة بأكبر قدر ممكن من التفاصيل…",
+    "messageRequired": "اشرح ما الذي تحتاج المساعدة فيه"
+  },
+  "reply": {
+    "notFound": "التذكرة غير موجودة",
+    "removed": "ربما تم حذف هذه التذكرة.",
+    "back": "العودة إلى التذاكر",
+    "noReplyYet": "لم يرد فريق الدعم بعد — سيظهر ردهم هنا.",
+    "placeholder": "اكتب ردك هنا…",
+    "attachSoon": "المرفقات قريباً",
+    "attach": "إرفاق",
+    "send": "رد",
+    "supportTeam": "فريق الدعم",
+    "details": "تفاصيل التذكرة",
+    "customer": "العميل",
+    "email": "البريد الإلكتروني",
+    "reopen": "إعادة فتح التذكرة",
+    "markResolved": "تعليمها كمحلولة"
+  },
+  "status": {
+    "open": "مفتوحة",
+    "pending": "قيد الانتظار",
+    "solved": "تم حلها"
+  },
+  "category": {
+    "general": "دعم عام",
+    "billing": "الفوترة",
+    "technical": "مشكلة تقنية",
+    "deployment": "مشكلة في النشر"
+  }
+}

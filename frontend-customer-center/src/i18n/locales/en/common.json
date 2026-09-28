@@ -1,0 +1,92 @@
+{
+  "language": {
+    "switcherLabel": "Language",
+    "chooseTitle": "Would you like to use {{language}}?",
+    "chooseBody": "We noticed you might prefer {{language}}. You can change this any time from the language menu.",
+    "keepEnglish": "Continue in English",
+    "useSuggested": "Switch to {{language}}",
+    "saveFailed": "We could not save your language choice. It is applied here, and we will try again next time you sign in.",
+    "defaultTag": "Default"
+  },
+  "units": {
+    "hourShort": "h",
+    "perHour": "/hr",
+    "perMonth": "/mo",
+    "perDay": "/day"
+  },
+  "duration": {
+    "underAMinute": "under a minute",
+    "minutes_one": "{{count}} min",
+    "minutes_other": "{{count}} min",
+    "hoursOnly": "{{hours}}h",
+    "hoursMinutes": "{{hours}}h {{minutes}}m"
+  },
+  "emptyBalance": {
+    "stoppedTitle": "Your credit ran out and prepaid deployments were stopped",
+    "paygTitle": "Your credit balance is empty — pay-as-you-go is covering your usage",
+    "emptyTitle": "Your credit balance is empty",
+    "stoppedBody": "Add credit to start them again, or switch them to pay-as-you-go, which keeps running and bills you afterwards.",
+    "willStopBody": "Your prepaid deployments will be stopped at the next billing run unless you add credit.",
+    "paygBody": "Your pay-as-you-go deployments are still running — that time is still charged, and goes onto your outstanding balance.",
+    "owed": "You currently owe {{amount}}.",
+    "cardRequired": "This platform also requires a verified card on file before anything can start again.",
+    "addCard": "Add a card",
+    "addCredit": "Add credit",
+    "limitTitle": "Pay-as-you-go limit reached — your deployments are paused",
+    "limitBody": "You owe {{owed}}, which is {{over}} over your limit of {{limit}}, so your pay-as-you-go deployments have been paused.",
+    "limitResume": "Add credit to bring your balance back under the limit — they start again automatically.",
+    "tooOldTitle": "Payment overdue — your deployments are paused",
+    "tooOldBody_one": "Your outstanding balance of {{amount}} has been unpaid for {{count}} day, longer than the {{max}} days allowed, so your pay-as-you-go deployments have been paused.",
+    "tooOldBody_other": "Your outstanding balance of {{amount}} has been unpaid for {{count}} days, longer than the {{max}} days allowed, so your pay-as-you-go deployments have been paused.",
+    "tooOldResume": "Pay it in full — they start again automatically.",
+    "pausedDiskCharged": "Paused deployments keep their disks, and that storage is still charged: {{amount}} a day, added to what you owe."
+  },
+  "status": {
+    "pending_review": "Pending review",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "provisioning": "Provisioning",
+    "running": "Running",
+    "paused": "Paused",
+    "stopped": "Stopped",
+    "failed": "Failed",
+    "terminated": "Terminated"
+  },
+  "action": {
+    "pause": "Pause",
+    "resume": "Resume",
+    "stop": "Stop",
+    "terminate": "Terminate",
+    "close": "Close",
+    "refresh": "Refresh",
+    "done": "Done",
+    "hide": "Hide",
+    "reveal": "Reveal",
+    "addCredit": "Add credit",
+    "addCard": "Add a card",
+    "browseModels": "Browse models",
+    "newDeployment": "New deployment",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "retry": "Retry",
+    "save": "Save"
+  },
+  "label": {
+    "total": "Total",
+    "rate": "Rate",
+    "status": "Status",
+    "actions": "Actions",
+    "model": "Model",
+    "region": "Region",
+    "hours": "Hours",
+    "charge": "Charge",
+    "current": "Current",
+    "running": "Running",
+    "storage": "Storage",
+    "compute": "Compute",
+    "name": "Name"
+  },
+  "error": {
+    "network": "Network error. Please try again."
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "list": {
+    "title": "سپورٹ ٹکٹس",
+    "subtitle": "آپ کی سپورٹ درخواستیں اور ان کی حالت۔",
+    "newTicket": "نیا ٹکٹ",
+    "total": "کل",
+    "totalCaption": "آپ کی بھیجی ہوئی تمام درخواستیں",
+    "awaiting": "زیرِ التوا",
+    "awaitingCaption": "کھلی یا جواب کی منتظر",
+    "solved": "حل شدہ",
+    "solvedCaption": "حل ہو چکی درخواستیں",
+    "searchPlaceholder": "ٹکٹس تلاش کریں…",
+    "empty": "آپ نے ابھی تک کوئی سپورٹ ٹکٹ نہیں بھیجا",
+    "ticketId": "ٹکٹ آئی ڈی",
+    "created": "بنایا گیا",
+    "totalTickets": "کل\nٹکٹس",
+    "awaitingReply": "جواب کے\nمنتظر",
+    "solvedTickets": "حل شدہ\nٹکٹس"
+  },
+  "form": {
+    "title": "نیا سپورٹ ٹکٹ",
+    "submit": "ٹکٹ بھیجیں",
+    "subject": "موضوع",
+    "subjectPlaceholder": "مثلاً ڈیپلائمنٹ تیاری کے مرحلے میں اٹکی ہوئی ہے",
+    "subjectRequired": "اپنے ٹکٹ کو ایک مختصر موضوع دیں",
+    "category": "زمرہ",
+    "message": "پیغام",
+    "messagePlaceholder": "مسئلے کی جتنی تفصیل بتا سکتے ہیں بتائیں…",
+    "messageRequired": "بتائیں کہ آپ کو کس بات میں مدد چاہیے"
+  },
+  "reply": {
+    "notFound": "ٹکٹ نہیں ملا",
+    "removed": "ممکن ہے یہ ٹکٹ ہٹا دیا گیا ہو۔",
+    "back": "ٹکٹس پر واپس",
+    "noReplyYet": "ہماری سپورٹ ٹیم نے ابھی جواب نہیں دیا — ان کا جواب آپ کو یہیں نظر آئے گا۔",
+    "placeholder": "اپنا جواب یہاں لکھیں…",
+    "attachSoon": "منسلکات جلد آ رہے ہیں",
+    "attach": "منسلک کریں",
+    "send": "جواب دیں",
+    "supportTeam": "سپورٹ ٹیم",
+    "details": "ٹکٹ کی تفصیلات",
+    "customer": "کسٹمر",
+    "email": "ای میل",
+    "reopen": "ٹکٹ دوبارہ کھولیں",
+    "markResolved": "حل شدہ نشان زد کریں"
+  },
+  "status": {
+    "open": "کھلا",
+    "pending": "زیرِ التوا",
+    "solved": "حل شدہ"
+  },
+  "category": {
+    "general": "عمومی سپورٹ",
+    "billing": "بلنگ",
+    "technical": "تکنیکی مسئلہ",
+    "deployment": "ڈیپلائمنٹ کا مسئلہ"
+  }
+}

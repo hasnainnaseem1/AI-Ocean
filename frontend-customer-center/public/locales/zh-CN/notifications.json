@@ -1,0 +1,14 @@
+{
+  "title": "通知",
+  "markAllRead": "全部标为已读",
+  "loading": "加载中…",
+  "empty": "这里还没有内容。",
+  "open": "打开",
+  "context": {
+    "deployments": "部署",
+    "wallet": "钱包",
+    "modelCatalog": "模型目录",
+    "account": "账户",
+    "updates": "动态"
+  }
+}

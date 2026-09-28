@@ -1,0 +1,39 @@
+{
+  "section": {
+    "infrastructure": "Infrastructure",
+    "support": "Support"
+  },
+  "item": {
+    "overview": "Overview",
+    "models": "Models",
+    "machineTypes": "Machine Types",
+    "deployments": "Deployments",
+    "supportTicket": "Support Ticket",
+    "myProfile": "My profile",
+    "usageLimits": "Usage Limits",
+    "billing": "Billing"
+  },
+  "badge": {
+    "new": "NEW"
+  },
+  "sidebar": {
+    "open": "Open sidebar",
+    "close": "Close sidebar"
+  },
+  "header": {
+    "searchPlaceholder": "Search models…",
+    "lightMode": "Light Mode",
+    "darkMode": "Dark Mode"
+  },
+  "account": {
+    "signOut": "Sign out"
+  },
+  "chat": {
+    "title": "Support chat",
+    "subtitle": "We usually reply within a few hours",
+    "placeholder": "Type a message…",
+    "notConnected": "Chat isn't connected yet",
+    "open": "Support chat",
+    "close": "Close chat"
+  }
+}

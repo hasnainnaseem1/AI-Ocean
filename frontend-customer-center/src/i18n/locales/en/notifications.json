@@ -1,0 +1,14 @@
+{
+  "title": "Notifications",
+  "markAllRead": "Mark all read",
+  "loading": "Loading…",
+  "empty": "Nothing here yet.",
+  "open": "Open",
+  "context": {
+    "deployments": "Deployments",
+    "wallet": "Wallet",
+    "modelCatalog": "Model catalog",
+    "account": "Account",
+    "updates": "Updates"
+  }
+}
