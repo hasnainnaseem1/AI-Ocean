@@ -1,0 +1,13 @@
+node_modules/
+
+# Environment variables aur secrets
+.env
+.env.local
+
+# Build outputs
+dist/
+build/
+
+# OS generated files
+.DS_Store
+Thumbs.db
