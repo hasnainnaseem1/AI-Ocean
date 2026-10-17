@@ -59,6 +59,14 @@ module.exports = {
     title: 'Te quitaron de una organización',
     message: 'Ya no tienes acceso a {teamName}.',
   },
+  'support.ticketReplied': {
+    title: 'Soporte respondió a tu ticket',
+    message: 'Soporte respondió a {ticketNumber} — "{subject}".',
+  },
+  'support.ticketResolved': {
+    title: 'Tu ticket fue marcado como resuelto',
+    message: '{ticketNumber} — "{subject}" fue marcado como resuelto. Si esto no lo solucionó, solo responde y se reabrirá.',
+  },
   'deployment.approved': {
     title: 'Despliegue aprobado',
     message: 'Tu despliegue de {modelName} "{deploymentName}" ha sido aprobado y se está preparando.',

@@ -12,6 +12,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { usePermission } from '../../hooks/usePermission';
 import deploymentsApi from '../../api/deploymentsApi';
+import CloudMachinePanel from './CloudMachinePanel';
 import usersApi from '../../api/usersApi';
 import { PERMISSIONS } from '../../utils/permissions';
 import { STATUS_META } from './DeploymentsListPage';
@@ -36,6 +37,9 @@ const DeploymentDetailPage = () => {
 
   const [deployment, setDeployment] = useState(null);
   const [usage, setUsage] = useState([]);
+  // Null on every platform that has not been switched to automatic
+  // provisioning, which is what makes the panel render nothing.
+  const [cloudInstance, setCloudInstance] = useState(null);
   const [allowedTransitions, setAllowedTransitions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -57,6 +61,7 @@ const DeploymentDetailPage = () => {
       const data = await deploymentsApi.getDeployment(id);
       setDeployment(data.deployment);
       setUsage(data.usage || []);
+      setCloudInstance(data.cloudInstance || null);
       setAllowedTransitions(data.allowedTransitions || []);
       setError(null);
 
@@ -327,6 +332,19 @@ const DeploymentDetailPage = () => {
               </Form>
             </Card>
           )}
+
+          {/*
+            * The real machine, under the records of it. Below the endpoint card
+            * on purpose: the endpoint is what the customer was given, this is
+            * what is actually running, and reading them in that order is how an
+            * operator checks one against the other.
+            */}
+          <CloudMachinePanel
+            deploymentId={id}
+            instance={cloudInstance}
+            canManage={canManage}
+            onChanged={load}
+          />
         </Col>
 
         {/* Customer, config, internal notes, timeline */}

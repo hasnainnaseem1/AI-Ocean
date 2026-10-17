@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Button, Space, message, Tag, Typography,
+  Button, Space, message, Tag, Typography, Select,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined,
@@ -13,6 +13,7 @@ import DataTable, { rowActions } from '../../components/common/DataTable';
 import { StatRow, StatCard } from '../../components/StatRow';
 import { usePermission } from '../../hooks/usePermission';
 import { modelsApi } from '../../api/catalogApi';
+import settingsApi from '../../api/settingsApi';
 import { PERMISSIONS } from '../../utils/permissions';
 import { useTheme } from '../../contexts/ThemeContext';
 import { STATUS_COLORS as THEME_STATUS_COLORS } from '../../theme/colors';
@@ -41,6 +42,62 @@ const ModelsListPage = () => {
   const canEdit = hasPermission(PERMISSIONS.MODELS_EDIT);
   const canCreate = hasPermission(PERMISSIONS.MODELS_CREATE);
   const canDelete = hasPermission(PERMISSIONS.MODELS_DELETE);
+  const canManage = canEdit;
+
+  /*
+   * Which clouds are switched on, and which one unassigned models use.
+   *
+   * Read from settings rather than hardcoded, because the per-model cloud
+   * column only makes sense when there is more than one cloud to choose
+   * between — and the "Default" option has to name the cloud it actually
+   * resolves to, or it tells an admin nothing.
+   */
+  const [enabledClouds, setEnabledClouds] = useState([]);
+  const [defaultCloud, setDefaultCloud] = useState('');
+  const [savingCloud, setSavingCloud] = useState(null);
+
+  useEffect(() => {
+    settingsApi.getSettings().then((data) => {
+      const st = data?.settings || {};
+      setEnabledClouds([
+        ...(st.gcpSettings?.enabled ? [{ value: 'gcp', label: 'Google Cloud' }] : []),
+        ...(st.awsSettings?.enabled ? [{ value: 'aws', label: 'AWS' }] : []),
+      ]);
+      setDefaultCloud(st.cloudRoutingSettings?.defaultCloud || '');
+    }).catch(() => { /* the column simply does not render */ });
+  }, []);
+
+  const defaultCloudLabel = defaultCloud
+    ? (defaultCloud === 'aws' ? 'AWS' : 'Google Cloud')
+    : 'none set';
+
+  /**
+   * Assign a model to a cloud.
+   *
+   * The message afterwards says what did NOT move, because that is the part
+   * people get wrong: changing this decides where the next deployment goes,
+   * and every machine already running stays exactly where it was built.
+   */
+  const setModelCloud = async (row, value) => {
+    setSavingCloud(row.id);
+    try {
+      const data = await modelsApi.setCloud(row.id, value);
+      const already = Object.entries(data.existingDeployments || {})
+        .filter(([, n]) => n > 0)
+        .map(([cloud, n]) => `${n} on ${cloud === 'manual' ? 'the manual queue' : cloud.toUpperCase()}`);
+
+      message.success(
+        already.length
+          ? `${data.message} ${already.join(', ')} stay where they are.`
+          : data.message
+      );
+      setModels((prev) => prev.map((m) => (m.id === row.id ? { ...m, cloudProvider: value || null } : m)));
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Could not set the cloud for this model');
+    } finally {
+      setSavingCloud(null);
+    }
+  };
 
   const fetchModels = useCallback(async () => {
     setLoading(true);
@@ -146,6 +203,39 @@ const ModelsListPage = () => {
         </Text>
       ),
     },
+    /*
+      * Which cloud this model's machines are built on.
+      *
+      * Shown only when more than one cloud is switched on — with a single
+      * cloud there is nothing to choose, and a dropdown with one option is
+      * noise that implies a decision nobody has to make.
+      *
+      * Changing it decides where the NEXT deployment goes. Everything already
+      * running keeps the cloud frozen onto it, which the confirmation says
+      * out loud because it is the opposite of what people expect.
+      */
+    ...(enabledClouds.length > 1 ? [{
+      title: 'Cloud',
+      dataIndex: 'cloudProvider',
+      // Wide enough for "Default (Google Cloud)" to read in full — the whole
+      // value of the label is naming which cloud "default" resolves to, and a
+      // truncated one says less than no label at all.
+      width: 230,
+      render: (value, row) => (
+        <Select
+          size="small"
+          style={{ width: 210 }}
+          value={value || ''}
+          loading={savingCloud === row.id}
+          disabled={!canManage || savingCloud === row.id}
+          onChange={(v) => setModelCloud(row, v)}
+          options={[
+            { value: '', label: `Default (${defaultCloudLabel})` },
+            ...enabledClouds,
+          ]}
+        />
+      ),
+    }] : []),
     {
       title: 'Deployments',
       dataIndex: 'deploymentCount',

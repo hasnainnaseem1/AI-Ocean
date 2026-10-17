@@ -122,6 +122,8 @@
     "paymentMethod": "Payment method",
     "cardOnFile": "A verified card is on file.",
     "addVerifiedCard": "Add a verified card",
+    "finishInNewTab": "Add your card in the tab that just opened, then come back here.",
+    "iAddedMyCard": "I've added my card",
     "cardRequired": "A verified card is required before you can deploy.",
     "cardVerified": "Card verified.",
     "cardStartFailed": "Could not start card verification.",

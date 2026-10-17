@@ -11,6 +11,7 @@ const userDeletionService = require('../../../services/user/userDeletionService'
 const { adminAuth } = require('../../../middleware/auth');
 const { checkPermission } = require('../../../middleware/security');
 const { getClientIP } = require('../../../utils/helpers/ipHelper');
+const { safeFilename } = require('../../../utils/helpers/csv');
 const { formatUserResponse } = require('../../../utils/helpers/userFormatter');
 const { validatePassword } = require('../../../utils/helpers/securityHelper');
 const { byPublicIds } = require('../../../utils/helpers/publicId');
@@ -410,8 +411,10 @@ router.get('/:id/activity/export', adminAuth, checkPermission('users.view'), asy
 
     const csv = csvRows.join('\n');
     const timestamp = new Date().toISOString().split('T')[0];
+    // The user's own name goes into the filename, so it is sanitised — see
+    // `safeFilename`.
     const username = user ? user.name.replace(/\s+/g, '-').toLowerCase() : 'user';
-    const filename = `activity-${username}-${timestamp}.csv`;
+    const filename = safeFilename(`activity-${username}-${timestamp}.csv`, `activity-${timestamp}.csv`);
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

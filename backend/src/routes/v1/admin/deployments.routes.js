@@ -42,11 +42,27 @@ const endpointSummary = (d) => ({
   shutdownCompletedAt: d.endpoint?.shutdownCompletedAt || null,
 });
 
-/** Shape a deployment for the admin JSON response, with owner/assignee names attached. */
+/**
+ * Shape a deployment for the admin JSON response, with owner/assignee names
+ * attached. `id`, not `_id` — every other resource in this app (customer,
+ * ticket, admin, …) is keyed `id` since the move to Prisma, and the frontend
+ * reads `.id` on both of these already (DeploymentDetailPage's "View
+ * customer" button and its `assignedTo` field). `_id` here was a leftover
+ * from before that migration and made both silently resolve to `undefined`.
+ */
+/**
+ * The cloud machine, shaped for the admin screen.
+ *
+ * Shares one definition with the dedicated cloud routes: this panel and the
+ * actions that change it must never describe a machine differently.
+ */
+const cloudInstanceView = (row) =>
+  (row ? require('./cloudInstances.routes').serializeInstance(row) : null);
+
 const serialize = (d) => ({
   ...d.toObject(),
-  userId: { _id: d.userId, name: d.ownerRef?.name || '', email: d.ownerRef?.email || '' },
-  assignedTo: d.assignedTo ? { _id: d.assignedTo, name: d.assignedToRef?.name || '', email: d.assignedToRef?.email || '' } : null,
+  userId: { id: d.userId, name: d.ownerRef?.name || '', email: d.ownerRef?.email || '' },
+  assignedTo: d.assignedTo ? { id: d.assignedTo, name: d.assignedToRef?.name || '', email: d.assignedToRef?.email || '' } : null,
   endpoint: { ...d.toObject().endpoint, ...endpointSummary(d) },
 });
 
@@ -86,7 +102,21 @@ router.get('/:id', checkPermission('deployments.view'), async (req, res) => {
       return res.status(404).json({ success: false, message: 'Deployment not found' });
     }
 
-    const usage = await deploymentUsageService.listRecent(deployment.id, 50);
+    /*
+     * The machine, alongside the records. Read here rather than from a second
+     * endpoint so the page cannot show a deployment and its hardware from two
+     * different instants — which is exactly when they disagree, because the
+     * reconciler writes to the instance row every minute.
+     *
+     * `null` on every platform that has never provisioned anything, which is
+     * what the panel renders nothing for.
+     */
+    const [usage, cloudInstance] = await Promise.all([
+      deploymentUsageService.listRecent(deployment.id, 50),
+      require('../../../services/gcp/deploymentInstanceService')
+        .byDeployment(deployment.id)
+        .catch(() => null),
+    ]);
 
     res.json({
       success: true,
@@ -99,6 +129,7 @@ router.get('/:id', checkPermission('deployments.view'), async (req, res) => {
         },
       },
       usage,
+      cloudInstance: cloudInstance ? cloudInstanceView(cloudInstance) : null,
       allowedTransitions: deploymentService.ALLOWED_TRANSITIONS[deployment.status] || [],
     });
   } catch (error) {
@@ -152,12 +183,55 @@ router.put('/:id/status', checkPermission('deployments.manage'), async (req, res
       forceUnfunded: !!forceUnfunded,
     });
 
+    /*
+     * ── Approving is the trigger ──
+     *
+     * A deployment only waits for approval when its account has
+     * `autoDeploy = false`, which an admin set because they wanted to look at
+     * that account's requests first. Approving IS that look — so the machine
+     * is built here, automatically, rather than leaving the admin to go and
+     * build it by hand. From the customer's side the two paths are identical;
+     * the only difference is that a person said yes.
+     *
+     * Deliberately NOT fired for any other status. `running`, `paused`,
+     * `terminated` all mean something else entirely, and provisioning on a
+     * resume would create a second machine for a deployment that has one.
+     *
+     * Allowed to report failure, unlike the customer-facing create path: an
+     * admin is looking at this response, and telling them "approved" while
+     * nothing was built is the worse outcome.
+     */
+    let provisioning = null;
+    if (status === 'approved') {
+      provisioning = await require('../../../services/gcp/autoProvisionService')
+        .onAdminApproved(deployment, { actor: req.user })
+        .catch((err) => {
+          console.error('[Deployment] Approval could not be provisioned:', err.message);
+          return { attempted: false, provisioned: false, code: 'UNEXPECTED', message: err.message };
+        });
+    }
+
     // Never hand back the raw document as-is — it carries the encrypted key
     // ciphertext, and this response should say only what happened to it.
     res.json({
       success: true,
-      message: `Deployment marked as ${status}`,
+      message: provisioning?.provisioned
+        ? `Approved — the machine is being built (${provisioning.message})`
+        : `Deployment marked as ${status}`,
+      // Present only on an approval, and only when something was attempted, so
+      // the admin screen can show what the platform did without guessing.
+      ...(provisioning && provisioning.attempted ? { provisioning } : {}),
+      // An attempt that was refused is worth saying out loud rather than
+      // leaving the admin to notice the machine never appeared.
+      ...(provisioning && !provisioning.attempted && provisioning.code
+        && !['NOT_A_CLOUD', 'GCP_DISABLED'].includes(provisioning.code)
+        ? { provisioningSkipped: provisioning }
+        : {}),
       deployment: serialize(deployment),
+      cloudInstance: status === 'approved'
+        ? await require('../../../services/gcp/deploymentInstanceService')
+          .byDeployment(deployment.id).then(cloudInstanceView).catch(() => null)
+        : undefined,
       allowedTransitions: deploymentService.ALLOWED_TRANSITIONS[deployment.status] || [],
     });
   } catch (error) {

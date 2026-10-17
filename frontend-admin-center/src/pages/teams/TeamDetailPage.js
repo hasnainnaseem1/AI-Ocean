@@ -11,6 +11,7 @@ import {
 import PageHeader from '../../components/common/PageHeader';
 import { StatRow, StatCard } from '../../components/StatRow';
 import PaygAccessCard from '../../components/customers/PaygAccessCard';
+import AutoDeployCard from '../../components/AutoDeployCard';
 import teamsApi from '../../api/teamsApi';
 import { usePermission } from '../../hooks/usePermission';
 import { PERMISSIONS } from '../../utils/permissions';
@@ -396,6 +397,19 @@ const TeamDetailPage = () => {
             canManage={canManage}
             label="organization"
             save={(access, reason) => teamsApi.setPaygAccess(id, { access, reason })}
+            onChanged={load}
+            style={{ marginBottom: 16 }}
+          />
+
+          {/*
+            * An organization is an account too, so it gets the same control a
+            * personal customer does. Same component, same endpoint — the
+            * pay-as-you-go card above it answers 404 for a personal account,
+            * and that split is exactly what this avoids.
+            */}
+          <AutoDeployCard
+            account={{ ...team, id }}
+            canManage={canManage}
             onChanged={load}
             style={{ marginBottom: 16 }}
           />

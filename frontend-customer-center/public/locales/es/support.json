@@ -15,7 +15,8 @@
     "created": "Creado",
     "totalTickets": "Tickets\ntotales",
     "awaitingReply": "Esperando\nrespuesta",
-    "solvedTickets": "Tickets\nresueltos"
+    "solvedTickets": "Tickets\nresueltos",
+    "loadFailed": "No se pudieron cargar tus tickets. Inténtalo de nuevo en un momento."
   },
   "form": {
     "title": "Nuevo ticket de soporte",
@@ -26,11 +27,15 @@
     "category": "Categoría",
     "message": "Mensaje",
     "messagePlaceholder": "Describe el problema con todo el detalle que puedas…",
-    "messageRequired": "Describe en qué necesitas ayuda"
+    "messageRequired": "Describe en qué necesitas ayuda",
+    "submitFailed": "No se pudo abrir el ticket. Inténtalo de nuevo en un momento."
   },
   "reply": {
     "notFound": "Ticket no encontrado",
     "removed": "Puede que este ticket se haya eliminado.",
+    "loadFailed": "No se pudo cargar este ticket. Inténtalo de nuevo en un momento.",
+    "sendFailed": "No se pudo enviar tu mensaje. Inténtalo de nuevo en un momento.",
+    "statusFailed": "No se pudo actualizar el ticket. Inténtalo de nuevo en un momento.",
     "back": "Volver a los tickets",
     "noReplyYet": "Nuestro equipo de soporte aún no ha respondido: verás su respuesta aquí.",
     "placeholder": "Escribe aquí tu respuesta…",

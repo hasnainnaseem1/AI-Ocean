@@ -6,13 +6,14 @@ import {
 import {
   SaveOutlined, UserOutlined, MailOutlined, SafetyOutlined, BellOutlined,
   DollarOutlined, ThunderboltOutlined, ToolOutlined, FileTextOutlined, GlobalOutlined,
-  ApartmentOutlined,
+  ApartmentOutlined, BulbOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../components/common/PageHeader';
 import PermissionGuard from '../components/guards/PermissionGuard';
 import FormSection from '../components/common/FormSection';
 import TempEmailBlockingSettings from '../components/settings/TempEmailBlockingSettings';
 import EmailTemplatesSettings from '../components/settings/EmailTemplatesSettings';
+import AnalyticsPolicyPage from './analytics/AnalyticsPolicyPage';
 import { usePermission } from '../hooks/usePermission';
 import { useTheme } from '../contexts/ThemeContext';
 import { adminCardStyle } from '../theme/colors';
@@ -1093,7 +1094,35 @@ const SettingsPage = () => {
         { key: 'features', icon: <ThunderboltOutlined />, label: 'Features' },
       ],
     },
+    {
+      /*
+       * Here rather than under Analytics. Reading a dashboard and deciding
+       * what its numbers MEAN are different acts: changing `dormantDays` from
+       * 30 to 90 reveals nothing and silently re-grades every account on the
+       * platform. That is a settings change, so it lives with the settings.
+       */
+      key: 'g-analytics',
+      type: 'group',
+      label: 'Analytics',
+      children: [
+        { key: 'analytics-policy', icon: <BulbOutlined />, label: 'Analytics Policy' },
+      ],
+    },
   ];
+
+  /*
+   * Appended after `tabItems` is built, so the policy editor sits outside the
+   * forms machinery entirely. Every other section is an antd `Form` that has
+   * to stay mounted for `fetchSettings` to populate it; this one is a page of
+   * its own that fetches when it opens, so it renders only while selected —
+   * otherwise opening Settings would fire its requests whether or not anyone
+   * looks at it.
+   */
+  tabItems.push({
+    key: 'analytics-policy',
+    label: 'Analytics Policy',
+    children: activeKey === 'analytics-policy' ? <AnalyticsPolicyPage embedded /> : null,
+  });
 
   const activeSection = tabItems.find((t) => t.key === activeKey) || tabItems[0];
 

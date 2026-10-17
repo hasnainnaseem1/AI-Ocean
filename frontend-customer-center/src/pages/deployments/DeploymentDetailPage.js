@@ -226,6 +226,8 @@ const DeploymentDetailPage = () => {
 
   const meta = STATUS_META[deployment.status] || { color: 'default' };
   const isLive = deployment.status === 'running';
+  // On hold = paused or stopped. Only then do the pause-reason alerts apply.
+  const onHold = deployment.status === 'paused' || deployment.status === 'stopped';
   const hasEndpoint = !!deployment.endpoint?.url;
   const isPayg = deployment.billingMethod === 'payg';
   // Time on the clock that the hourly billing job has not charged for yet —
@@ -491,7 +493,11 @@ const DeploymentDetailPage = () => {
         {t('deployments:detail.back')}
       </Button>
 
-      {deployment.autoSuspendedForCredit && (
+      {/* Every alert below explains why a deployment is on hold. The flags
+          behind them outlive the hold — termination does not clear them — so
+          each is shown only while the deployment is actually paused or
+          stopped, never on one that has been terminated. */}
+      {onHold && deployment.autoSuspendedForCredit && (
         <Alert
           type="warning"
           showIcon
@@ -523,7 +529,7 @@ const DeploymentDetailPage = () => {
         />
       )}
 
-      {deployment.debtLimitSuspended && (
+      {onHold && deployment.debtLimitSuspended && (
         <Alert
           type="error"
           showIcon
@@ -538,7 +544,7 @@ const DeploymentDetailPage = () => {
         />
       )}
 
-      {deployment.cardGateSuspended && (
+      {onHold && deployment.cardGateSuspended && (
         <Alert
           type="warning"
           showIcon
@@ -551,7 +557,7 @@ const DeploymentDetailPage = () => {
         />
       )}
 
-      {storageGrace && (
+      {onHold && storageGrace && (
         <Alert
           type={storageGrace.daysRemaining <= 1 ? 'error' : 'warning'}
           showIcon

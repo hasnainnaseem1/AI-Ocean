@@ -8,6 +8,7 @@ const billingRoutes = require('./billing.routes');
 const paymentMethodsRoutes = require('./paymentMethods.routes');
 const teamsRoutes = require('./teams.routes');
 const invitationsRoutes = require('./invitations.routes');
+const supportRoutes = require('./support.routes');
 
 // All customer routes require authentication, and act on one account (Team) —
 // `teamContext` resolves it into `req.team` / `req.membership`.
@@ -21,5 +22,8 @@ router.use('/payment-methods', auth, teamContext, paymentMethodsRoutes);
 router.use('/teams', auth, teamContext, teamsRoutes);
 // Not behind teamContext: someone accepting an invitation is not a member yet.
 router.use('/invitations', auth, invitationsRoutes);
+// Not behind teamContext: a support ticket belongs to the person, not the
+// account they are switched into.
+router.use('/support', auth, supportRoutes);
 
 module.exports = router;

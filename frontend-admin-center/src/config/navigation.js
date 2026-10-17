@@ -26,6 +26,8 @@ import {
   SettingOutlined,
   ApiOutlined,
   ClockCircleOutlined,
+  CustomerServiceOutlined,
+  CloudOutlined,
 } from '@ant-design/icons';
 import { PERMISSIONS } from '../utils/permissions';
 
@@ -65,7 +67,34 @@ export const NAV_SECTIONS = [
     icon: <DashboardOutlined />,
     items: [
       { key: '/', icon: <DashboardOutlined />, label: 'Dashboard', keywords: ['home', 'overview', 'kpi', 'stats'] },
-      { key: '/analytics', icon: <BarChartOutlined />, label: 'Analytics', permission: PERMISSIONS.ANALYTICS_VIEW, keywords: ['charts', 'reports', 'growth', 'revenue'] },
+      /*
+       * One entry for all eight analytics tabs.
+       *
+       * They used to be seven items filed across five sections — infrastructure
+       * analytics beside the machines, revenue analytics beside the wallets,
+       * traffic beside the website. The reasoning was that somebody asking
+       * "why can nobody deploy an A100" is already in that section. In practice
+       * it scattered one subject across five menus, so comparing what customers
+       * are doing against what support is seeing meant knowing which two
+       * unrelated places to look. The keywords below cover every tab, so the
+       * search box still finds "SLA" or "cohort" or "bounce rate".
+       */
+      {
+        key: '/analytics',
+        icon: <BarChartOutlined />,
+        label: 'Analytics',
+        permission: PERMISSIONS.ANALYTICS_VIEW,
+        keywords: [
+          'charts', 'reports', 'growth',
+          'infrastructure', 'stock', 'capacity', 'utilisation', 'sizing',
+          'signups', 'activation', 'funnel', 'engagement', 'dau', 'seats', 'invitations',
+          'revenue', 'mrr', 'arr', 'receivables', 'dunning', 'aging',
+          'sla', 'backlog', 'first response', 'resolution', 'reopen',
+          'cohort', 'grr', 'nrr', 'retention', 'churn', 'at risk', 'dormant',
+          'traffic', 'visitors', 'pageviews', 'referrers', 'bounce', 'utm',
+          'export', 'csv',
+        ],
+      },
       { key: '/logs', icon: <FileTextOutlined />, label: 'Activity Logs', permission: PERMISSIONS.LOGS_VIEW, feature: 'enableActivityLogs', keywords: ['audit', 'history', 'events'] },
       { key: '/notifications', icon: <BellOutlined />, label: 'Notifications', keywords: ['alerts', 'messages', 'bell'] },
     ],
@@ -85,11 +114,37 @@ export const NAV_SECTIONS = [
     ],
   },
   {
+    /*
+     * Its own section, not a tab on Integrations.
+     *
+     * Integrations is about services the platform talks to — a payment gateway,
+     * an SMTP server — and each of those is one form. A cloud provider is not:
+     * it has credentials, a kill switch, spending limits, a price source, and
+     * machines that outlive all of them. Squeezed into one long form it was
+     * genuinely hard to manage, which is why it is a section with a page per
+     * provider.
+     */
+    section: 'Cloud',
+    icon: <CloudOutlined />,
+    items: [
+      { key: '/cloud', icon: <CloudOutlined />, label: 'Overview', permission: PERMISSIONS.DEPLOYMENTS_VIEW, keywords: ['provider', 'cost', 'margin', 'overhead', 'tax', 'floor'] },
+      { key: '/cloud/gcp', icon: <CloudServerOutlined />, label: 'Google Cloud', permission: PERMISSIONS.DEPLOYMENTS_VIEW, keywords: ['gcp', 'google', 'vm', 'provisioning', 'orphan', 'pricing', 'credentials'] },
+      { key: '/cloud/aws', icon: <CloudServerOutlined />, label: 'AWS', permission: PERMISSIONS.DEPLOYMENTS_VIEW, keywords: ['amazon', 'ec2', 'aws'] },
+    ],
+  },
+  {
     section: 'Customers',
     icon: <TeamOutlined />,
     items: [
       { key: '/customers', icon: <TeamOutlined />, label: 'Customers', permission: PERMISSIONS.CUSTOMERS_VIEW, keywords: ['accounts', 'users', 'signups'] },
       { key: '/teams', icon: <ApartmentOutlined />, label: 'Organizations', permission: PERMISSIONS.CUSTOMERS_VIEW, keywords: ['teams', 'companies', 'seats', 'members'] },
+    ],
+  },
+  {
+    section: 'Support',
+    icon: <CustomerServiceOutlined />,
+    items: [
+      { key: '/support-tickets', icon: <CustomerServiceOutlined />, label: 'Support Tickets', permission: PERMISSIONS.SUPPORT_VIEW, keywords: ['help', 'requests', 'inbox', 'replies'] },
     ],
   },
   {

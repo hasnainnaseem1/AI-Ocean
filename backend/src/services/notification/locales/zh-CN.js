@@ -60,6 +60,14 @@ module.exports = {
     title: '您已被移出团队',
     message: '您无法再访问 {teamName}。',
   },
+  'support.ticketReplied': {
+    title: '客服回复了您的工单',
+    message: '客服回复了 {ticketNumber} — "{subject}"。',
+  },
+  'support.ticketResolved': {
+    title: '您的工单已标记为已解决',
+    message: '{ticketNumber} — "{subject}" 已标记为已解决。如果问题仍未解决，只需回复即可重新打开。',
+  },
   'deployment.approved': {
     title: '部署已通过审核',
     message: '您的 {modelName} 部署“{deploymentName}”已通过审核，正在配置中。',

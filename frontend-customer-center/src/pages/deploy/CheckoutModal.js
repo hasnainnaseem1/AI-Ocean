@@ -37,7 +37,7 @@ const CheckoutModal = ({
   const { t } = useTranslation(['deploy', 'common']);
   const { isDark } = useTheme();
   const navigate = useNavigate();
-  const { stripePublishableKey } = usePayments();
+  const { stripePublishableKey, activeGateway } = usePayments();
   // A team member who may not see money (Developer) can still deploy, but is
   // shown no balance and offered no top-up or card — only who to ask. The
   // server sends them no wallet figures and refuses those actions anyway.
@@ -51,6 +51,9 @@ const CheckoutModal = ({
 
   const [cardBusy, setCardBusy] = useState(false);
   const [clientSecret, setClientSecret] = useState(null);
+  // Polar only: the hosted card page is open in another tab and we are waiting
+  // for the customer to come back from it.
+  const [awaitingPortal, setAwaitingPortal] = useState(false);
 
   const [topUpAmount, setTopUpAmount] = useState(null);
   const [toppingUp, setToppingUp] = useState(false);
@@ -104,17 +107,67 @@ const CheckoutModal = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, model?.id, JSON.stringify(machineRef)]);
 
+  /**
+   * Which way a card is added depends on the active gateway, exactly as it does
+   * on the Billing page: Stripe shows its card form inside this modal; Polar has
+   * no embedded form — the card is entered on Polar's own hosted page.
+   *
+   * This used to ask Stripe unconditionally, so on a platform running Polar
+   * (Stripe unconfigured) "Add a verified card" always failed with "Could not
+   * start card verification" and the customer could never deploy.
+   *
+   * Polar's page opens in a NEW tab, not by redirecting this one: the journey's
+   * answers live only in this page's memory, and a redirect would throw away
+   * everything the customer had just filled in.
+   */
   const openAddCard = async () => {
     setCardBusy(true);
+    // Opened synchronously, inside the click, then pointed at the URL once it
+    // arrives: a window opened after an await is treated as a pop-up and blocked.
+    const portalTab = activeGateway === 'polar' ? window.open('', '_blank') : null;
     try {
+      if (activeGateway === 'polar') {
+        const { url } = await paymentMethodsApi.startPolarPortal();
+        if (portalTab) {
+          portalTab.opener = null;
+          portalTab.location.href = url;
+        } else {
+          // Pop-ups are blocked outright; fall back to leaving this page.
+          window.location.href = url;
+          return;
+        }
+        setAwaitingPortal(true);
+        return;
+      }
       const { clientSecret: secret } = await paymentMethodsApi.createSetupIntent();
       setClientSecret(secret);
     } catch (err) {
+      if (portalTab) portalTab.close();
       message.error(err.response?.data?.message || t('deploy:checkout.cardStartFailed'));
     } finally {
       setCardBusy(false);
     }
   };
+
+  // Coming back from the Polar tab: look for the card they just saved. Nothing
+  // tells us the other tab finished, so the signal is simply this one being
+  // looked at again.
+  useEffect(() => {
+    if (!open || !awaitingPortal) return undefined;
+    const recheck = () => { if (document.visibilityState === 'visible') loadOptions(); };
+    window.addEventListener('focus', recheck);
+    document.addEventListener('visibilitychange', recheck);
+    return () => {
+      window.removeEventListener('focus', recheck);
+      document.removeEventListener('visibilitychange', recheck);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, awaitingPortal]);
+
+  // Once the card is on file there is nothing left to wait for.
+  useEffect(() => {
+    if (options?.cardGate?.hasVerifiedCard) setAwaitingPortal(false);
+  }, [options]);
 
   const handleCardVerified = async (setupIntentId) => {
     try {
@@ -293,6 +346,16 @@ const CheckoutModal = ({
                 <Button icon={<CreditCardOutlined />} loading={cardBusy} onClick={openAddCard}>
                   {t('deploy:checkout.addVerifiedCard')}
                 </Button>
+                {awaitingPortal && (
+                  <Space size={8} wrap>
+                    <Text type="secondary" style={{ fontSize: 12.5 }}>
+                      {t('deploy:checkout.finishInNewTab')}
+                    </Text>
+                    <Button size="small" loading={loading} onClick={loadOptions}>
+                      {t('deploy:checkout.iAddedMyCard')}
+                    </Button>
+                  </Space>
+                )}
               </Space>
             )}
           </div>

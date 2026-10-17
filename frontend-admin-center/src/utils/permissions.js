@@ -33,6 +33,10 @@ export const PERMISSIONS = {
   BILLING_VIEW: 'billing.view',
   BILLING_MANAGE: 'billing.manage',
 
+  // Support Tickets
+  SUPPORT_VIEW: 'support.view',
+  SUPPORT_MANAGE: 'support.manage',
+
   // Role Management
   ROLES_VIEW: 'roles.view',
   ROLES_CREATE: 'roles.create',
@@ -42,6 +46,12 @@ export const PERMISSIONS = {
   // Analytics
   ANALYTICS_VIEW: 'analytics.view',
   ANALYTICS_EXPORT: 'analytics.export',
+  // The backend has enforced this one since the analytics pages were written
+  // (customRolePermissions.js / userHelpers.js), but it was missing from both
+  // this map and the group below — and the Roles page renders the group. So
+  // the permission existed, was checked on every revenue endpoint, and could
+  // not be granted from the UI at all.
+  ANALYTICS_REVENUE: 'analytics.revenue',
 
   // Activity Logs
   LOGS_VIEW: 'logs.view',
@@ -87,6 +97,10 @@ export const PERMISSION_GROUPS = {
     PERMISSIONS.BILLING_VIEW,
     PERMISSIONS.BILLING_MANAGE,
   ],
+  'Support Tickets': [
+    PERMISSIONS.SUPPORT_VIEW,
+    PERMISSIONS.SUPPORT_MANAGE,
+  ],
   'Customer Management': [
     PERMISSIONS.CUSTOMERS_VIEW,
     PERMISSIONS.CUSTOMERS_CREATE,
@@ -104,6 +118,7 @@ export const PERMISSION_GROUPS = {
   ],
   Analytics: [
     PERMISSIONS.ANALYTICS_VIEW,
+    PERMISSIONS.ANALYTICS_REVENUE,
     PERMISSIONS.ANALYTICS_EXPORT,
   ],
   'Activity Logs': [

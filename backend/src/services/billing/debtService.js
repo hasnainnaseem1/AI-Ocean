@@ -20,6 +20,22 @@ const {
 } = creditService;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Written whenever a debt is cleared IN FULL, by whatever route.
+ *
+ * The failure count and last attempt describe collecting THIS debt. Left in
+ * place after the debt is paid, they were attached to the next one: an account
+ * that paid off on 18 September and fell into debt again on the 20th showed
+ * "2 failed attempts, last on 14 September" against a debt no one had yet
+ * tried to collect — and the Dashboard's failing-collections check counted it.
+ * A card payment already reset these; a top-up and a write-off did not.
+ */
+const CLEARED_COLLECTION_STATE = {
+  autoChargeFailures: 0,
+  lastAutoChargeError: '',
+  lastAutoChargeAt: null,
+};
 /**
  * Money is rounded to four decimals, not two, because that is the precision the
  * database actually stores (`Decimal(12, 4)` on every balance and amount) and
@@ -160,7 +176,12 @@ const settleFromWallet = async (teamId, reference = {}) => {
     prisma.creditWallet.update({
       where: { id: wallet.id },
       data: {
-        balance: newBalance, lifetimeSpend: newLifetimeSpend, outstandingBalance: newOutstanding, debtSince, debtNotifiedAt,
+        balance: newBalance,
+        lifetimeSpend: newLifetimeSpend,
+        outstandingBalance: newOutstanding,
+        debtSince,
+        debtNotifiedAt,
+        ...(newOutstanding <= 0 ? CLEARED_COLLECTION_STATE : {}),
       },
     }),
     prisma.creditTransaction.create({
@@ -291,7 +312,9 @@ const writeOff = async (teamId, { reason, actor } = {}) => {
   const [updatedWallet, transaction] = await prisma.$transaction([
     prisma.creditWallet.update({
       where: { id: wallet.id },
-      data: { outstandingBalance: 0, debtSince: null, debtNotifiedAt: null },
+      data: {
+        outstandingBalance: 0, debtSince: null, debtNotifiedAt: null, ...CLEARED_COLLECTION_STATE,
+      },
     }),
     prisma.creditTransaction.create({
       data: {

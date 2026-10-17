@@ -28,6 +28,9 @@ const AVAILABLE_PERMISSIONS = [
   // Billing & Credits
   'billing.view', 'billing.manage',
 
+  // Support Tickets
+  'support.view', 'support.manage',
+
   // Activity Logs
   'logs.view', 'logs.export', 'logs.delete',
 

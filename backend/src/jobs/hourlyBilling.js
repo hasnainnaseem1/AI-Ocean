@@ -21,7 +21,7 @@ const creditService = require('../services/billing/creditService');
 const billingModeService = require('../services/billing/billingModeService');
 const deploymentBilling = require('../services/billing/deploymentBilling');
 const deploymentService = require('../services/deployment/deploymentService');
-const { BILLABLE_STATUSES } = require('../services/deployment/deploymentConstants');
+const { isComputeBillable } = require('../services/deployment/deploymentConstants');
 const adminNotifier = require('../services/notification/adminNotifier');
 const { billingCopy } = require('../services/billing/copyTemplates');
 const debtEnforcement = require('../services/billing/debtEnforcement');
@@ -46,7 +46,7 @@ const teamService = require('../services/team/teamService');
  */
 const suspendOrderRank = (deployment, suspendOrder) => {
   const isPrepaidRunning = deployment.billingMethod !== 'payg'
-    && BILLABLE_STATUSES.includes(deployment.status);
+    && isComputeBillable(deployment);
   if (!isPrepaidRunning) return -Infinity;
 
   switch (suspendOrder) {
@@ -84,7 +84,7 @@ const run = async () => {
 
   billable.sort((a, b) => suspendOrderRank(a, settings.suspendOrder) - suspendOrderRank(b, settings.suspendOrder));
 
-  const runningCount = billable.filter((d) => BILLABLE_STATUSES.includes(d.status)).length;
+  const runningCount = billable.filter((d) => isComputeBillable(d)).length;
   console.log(
     `[CRON] Billing ${billable.length} deployment(s) — ${runningCount} running, `
     + `${billable.length - runningCount} stopped (storage only)`
@@ -125,7 +125,9 @@ const run = async () => {
        * not override that by suspending it anyway just because the shared
        * wallet happens to read zero.
        */
-      const stillRunning = BILLABLE_STATUSES.includes(deployment.status);
+      // Burning the compute rate — which now includes a deployment whose GCP
+      // machine is up while it is still being configured.
+      const stillRunning = isComputeBillable(deployment);
       const isPayg = deployment.billingMethod === 'payg';
 
       if (settings.autoSuspendAtZero && stillRunning && !isPayg) {
@@ -222,7 +224,7 @@ const run = async () => {
  */
 const stopUnbillable = async (deployment, settings, cause) => {
   if (!settings.autoSuspendAtZero) return;
-  if (!BILLABLE_STATUSES.includes(deployment.status)) return;
+  if (!isComputeBillable(deployment)) return;
 
   try {
     await deploymentService.transition(deployment, 'paused', {

@@ -220,11 +220,11 @@ module.exports = {
     subject: '{{title}} · {{siteName}}',
     body: `
       <h2 style="color: {{primaryColor}}; margin: 0 0 16px;">{{title}}</h2>
-      <p>مرحبًا {{name}}،</p>
+      <p>مرحبًا {{userName}}،</p>
       <p>{{message}}</p>
       {{actionBlock}}
       <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">
-        وصلتك هذه الرسالة بسبب عضويتك في فريق على {{siteName}}.
+        وصلتك هذه الرسالة بسبب نشاط في حسابك على {{siteName}}.
       </p>
     `,
   },

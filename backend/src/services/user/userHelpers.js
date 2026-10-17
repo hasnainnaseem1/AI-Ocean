@@ -19,22 +19,39 @@ const BUILT_IN_PERMISSIONS = {
     'models.view', 'models.create', 'models.edit', 'models.delete',
     'deployments.view', 'deployments.manage',
     'billing.view', 'billing.manage',
+    'support.view', 'support.manage',
     // Revenue used to be gated by a hardcoded `role === 'admin'` check in
     // analytics.routes.js. It is a real permission now, so the built-in roles
     // carry it (or not) exactly as that check used to decide: admin yes,
     // moderator and viewer no.
-    'analytics.view', 'analytics.revenue', 'logs.view', 'settings.edit'
+    // `settings.view` was missing while `settings.edit` was present — a role
+    // allowed to change settings but not to read them. The admin center's
+    // layout loads platform settings on every page, so a built-in admin got
+    // two 403 toasts on every single screen, and the Settings page could not
+    // show them what they were about to edit.
+    'analytics.view', 'analytics.revenue', 'logs.view', 'settings.view', 'settings.edit'
   ],
+  /*
+   * Deliberately NO `settings.view` here.
+   *
+   * These roles were getting a 403 toast on every screen because the admin
+   * centre's layout fetched the whole settings document just to learn which
+   * features are switched on. The tempting fix — granting `settings.view` —
+   * would also hand them the Settings and Integrations pages, and Integrations
+   * shows payment-gateway credentials. The layout now asks a narrow endpoint
+   * (`GET /admin/settings/features`) that any admin may read instead, which is
+   * the actual need; this stays as tight as it was.
+   */
   moderator: [
     'users.view', 'customers.view', 'customers.edit',
     'models.view', 'models.edit',
     'deployments.view', 'deployments.manage',
-    'billing.view',
+    'billing.view', 'support.view',
     'analytics.view'
   ],
   viewer: [
     'users.view', 'customers.view',
-    'models.view', 'deployments.view', 'billing.view',
+    'models.view', 'deployments.view', 'billing.view', 'support.view',
     'analytics.view'
   ]
 };

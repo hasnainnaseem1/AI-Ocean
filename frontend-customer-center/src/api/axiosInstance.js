@@ -2,6 +2,7 @@ import axios from 'axios';
 import config from '../config';
 import { endsSession, endReason } from '../auth/sessionPolicy';
 import { getActiveTeamId, setActiveTeamId, TEAM_ACCESS_LOST } from '../auth/activeTeam';
+import { getToken, clearSession } from '../auth/tokenStorage';
 
 const axiosInstance = axios.create({
   baseURL: config.apiUrl,
@@ -12,7 +13,7 @@ const axiosInstance = axios.create({
 // Request interceptor — inject auth token
 axiosInstance.interceptors.request.use(
   (cfg) => {
-    const token = localStorage.getItem('token');
+    const token = getToken();
     if (token) cfg.headers.Authorization = `Bearer ${token}`;
     // Which account this request acts on (see auth/activeTeam.js). A call
     // that names its account itself — e.g. inviting into a team just created
@@ -39,8 +40,7 @@ axiosInstance.interceptors.response.use(
     }
 
     if (endsSession(status, data)) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      clearSession();
       if (window.location.pathname !== '/login') {
         const reason = endReason(data);
         window.location.href = reason

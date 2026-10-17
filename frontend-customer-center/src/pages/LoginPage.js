@@ -12,6 +12,7 @@ import { useGoogleLogin } from '@react-oauth/google';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { useSite } from '../context/SiteContext';
+import { getRememberedEmail, setRememberedEmail } from '../auth/rememberedEmail';
 import AuthShell from '../components/AuthShell';
 import config from '../config';
 
@@ -63,8 +64,9 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
-  // Arriving from an invitation: the address it is for, filled in.
-  const presetEmail = new URLSearchParams(location.search).get('email') || undefined;
+  // Arriving from an invitation: the address it is for, filled in. Otherwise
+  // whatever email "Remember me" last saved on this browser, if any.
+  const presetEmail = new URLSearchParams(location.search).get('email') || getRememberedEmail() || undefined;
   const { siteConfig, loaded: siteLoaded } = useSite();
   const googleEnabled = !!(siteConfig?.googleSSO?.enabled && siteConfig?.googleSSO?.clientId);
   const loginDisabled = siteLoaded && siteConfig?.enableLogin === false;
@@ -88,7 +90,8 @@ const LoginPage = () => {
       const data = await res.json();
 
       if (data.success) {
-        login(data.token, data.user);
+        login(data.token, data.user, values.rememberMe !== false);
+        setRememberedEmail(values.rememberMe !== false ? values.email : '');
         navigate(afterSignIn(location.search));
       } else if (data.emailVerificationRequired) {
         setActionData({ action: 'verify_email', email: values.email });
@@ -143,7 +146,7 @@ const LoginPage = () => {
         />
       )}
 
-      <Form form={form} layout="vertical" onFinish={handleSubmit} size="large" requiredMark={false} initialValues={{ email: presetEmail }}>
+      <Form form={form} layout="vertical" onFinish={handleSubmit} size="large" requiredMark={false} initialValues={{ email: presetEmail, rememberMe: true }}>
         <Form.Item
           name="email"
           label={<Text strong>{t('fields.emailLabel')}</Text>}
@@ -152,7 +155,7 @@ const LoginPage = () => {
             { type: 'email',  message: t('fields.emailInvalid') },
           ]}
         >
-          <Input prefix={<MailOutlined style={{ color: tok.colorTextTertiary }} />} placeholder={t('fields.emailPlaceholder')} />
+          <Input prefix={<MailOutlined style={{ color: tok.colorTextTertiary }} />} placeholder={t('fields.emailPlaceholder')} autoComplete="username" />
         </Form.Item>
 
         <Form.Item
@@ -165,6 +168,7 @@ const LoginPage = () => {
             prefix={<LockOutlined style={{ color: tok.colorTextTertiary }} />}
             placeholder={t('fields.passwordPlaceholder')}
             iconRender={v => (v ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
+            autoComplete="current-password"
           />
         </Form.Item>
 

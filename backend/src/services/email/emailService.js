@@ -363,14 +363,15 @@ class EmailService {
   }
 
   /**
-   * One team event, as an email.
+   * One account-level event, as an email — a team event originally, now also
+   * used for support ticket replies (services/support/supportTicketService).
    *
    * The wording arrives already rendered in the recipient's language — it is
    * the same sentence their bell shows, asked of the same catalogue
-   * (services/team/teamNotifier) — so this only wraps it. The button is built
-   * here rather than in the template because most events have nowhere
-   * particular to send anybody, and an empty button in a mail client is worse
-   * than no button.
+   * (notificationCopy's `contentKey` system) — so this only wraps it. The
+   * button is built here rather than in the template because most events have
+   * nowhere particular to send anybody, and an empty button in a mail client
+   * is worse than no button.
    */
   async sendTeamNotificationEmail(recipient, {
     title, message, actionLabel, actionUrl,
@@ -477,6 +478,13 @@ class EmailService {
       acceptUrl: customerUrl + '/invite/sample-token-123',
       expiresDays: '7',
       pricePerHour: '1.85',
+      // Generic account notification (teams, support tickets, ...)
+      title: 'Support replied to your ticket',
+      message: 'TCK-1042 — "Deployment stuck at pending" has a new reply.',
+      actionBlock: '<div style="text-align: center; margin: 28px 0;">'
+        + '<a href="' + customerUrl + '/support/sample-ticket-id" target="_blank" rel="noopener noreferrer" '
+        + 'style="background: #4f46e5; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">'
+        + 'View ticket</a></div>',
       // Wallet
       amount: '50.00',
       balance: '12.40',

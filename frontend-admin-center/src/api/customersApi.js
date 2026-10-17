@@ -57,10 +57,17 @@ const customersApi = {
         const link = document.createElement('a');
         link.href = url;
 
+        /*
+         * `[^"]+` rather than `.+`: a greedy `.+` swallows the closing quote
+         * and leaves it on the end of the name, so the file saves as
+         * `customers-2026-10-06.csv"`. It never showed because the header was
+         * not readable cross-origin until `exposedHeaders` was set, so this
+         * branch had never once run.
+         */
         const contentDisposition = response.headers['content-disposition'];
         let fileName = 'customers.csv';
         if (contentDisposition) {
-          const fileNameMatch = contentDisposition.match(/filename="?(.+)"?/);
+          const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
           if (fileNameMatch && fileNameMatch.length === 2) {
             fileName = fileNameMatch[1];
           }
@@ -103,10 +110,11 @@ const customersApi = {
         const link = document.createElement('a');
         link.href = url;
 
+        // Same greedy-match trap as `exportCustomers` above.
         const contentDisposition = response.headers['content-disposition'];
         let fileName = 'customer_activity.csv';
         if (contentDisposition) {
-          const fileNameMatch = contentDisposition.match(/filename="?(.+)"?/);
+          const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
           if (fileNameMatch && fileNameMatch.length === 2) {
             fileName = fileNameMatch[1];
           }

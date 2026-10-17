@@ -25,6 +25,7 @@ const paymentService = require('../billing/paymentService');
 const activityLogService = require('../admin/activityLogService');
 const customerNoteService = require('../admin/customerNoteService');
 const notificationService = require('../notification/notificationService');
+const supportTicketService = require('../support/supportTicketService');
 
 /**
  * Delete users and everything that would otherwise block them.
@@ -102,6 +103,7 @@ const deleteUsersCompletely = async (users) => {
     if (personalIds.length) await tx.team.deleteMany({ where: { id: { in: personalIds } } });
     await activityLogService.deleteAllForUsers(ids, tx);
     await customerNoteService.deleteAllForUsers(ids, tx);
+    await supportTicketService.deleteAllForUsers(ids, tx);
     await notificationService.deleteAllForUsers(ids, tx);
 
     for (const u of list) {

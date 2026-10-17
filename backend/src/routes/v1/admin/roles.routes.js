@@ -373,6 +373,7 @@ router.get('/permissions/available', adminAuth, checkPermission('roles.view'), c
       roles: permissions.filter(p => p.startsWith('roles.')),
       analytics: permissions.filter(p => p.startsWith('analytics.')),
       logs: permissions.filter(p => p.startsWith('logs.')),
+      support: permissions.filter(p => p.startsWith('support.')),
       settings: permissions.filter(p => p.startsWith('settings.')),
       notifications: permissions.filter(p => p.startsWith('notifications.')),
       system: permissions.filter(p => p.startsWith('system.'))

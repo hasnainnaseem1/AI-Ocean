@@ -1,0 +1,21 @@
+-- What the platform adds on top of a cloud provider's charge.
+--
+-- A customer pays for a machine. The platform pays for the machine AND for
+-- everything that machine needs in order to be reachable and safe: the NAT
+-- gateway its egress goes through, the egress itself, flow logs, the platform's
+-- own always-on infrastructure, and tax on all of it. None of that appears on
+-- any per-VM price list, because no cloud sells it that way — NAT and egress
+-- are billed on usage, across a whole project, once.
+--
+-- So the true cost of a machine-hour is the provider's charge plus a share of
+-- all that, and the lowest price a tier may carry is that cost plus the margin
+-- the platform needs. Those four numbers live in this column.
+--
+-- Nullable with no default, like every other settings section: the defaults in
+-- `adminSettingsDefaults.js` are merged on read, so a platform that never opens
+-- this screen behaves exactly as it did before the column existed. Every
+-- default is zero, which means the provider's raw cost and nothing invented on
+-- top — a pricing engine that guesses is worse than one that admits it does not
+-- know, because the guess is what somebody prices a product against.
+ALTER TABLE "admin_settings"
+  ADD COLUMN "cloud_pricing_settings" JSONB;

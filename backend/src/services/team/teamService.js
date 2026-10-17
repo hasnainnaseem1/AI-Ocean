@@ -20,6 +20,9 @@ const TEAM_SELECT = {
   name: true,
   createdById: true,
   paygAccess: true,
+  autoDeploy: true,
+  autoDeployOffReason: true,
+  autoDeployChangedAt: true,
   disputeHold: true,
   disputeReason: true,
   disputedAt: true,
@@ -89,6 +92,7 @@ const createPersonal = async (user, db = prisma) => {
  * accepted, so a caller cannot use this to move money or reassign an owner.
  */
 const WRITABLE = ['name', 'paygAccess', 'disputeHold', 'disputeReason', 'disputedAt',
+  'autoDeploy', 'autoDeployOffReason', 'autoDeployChangedAt',
   'stripeCustomerId', 'polarCustomerId', 'discoverableByDomain'];
 
 const update = async (team, data) => {

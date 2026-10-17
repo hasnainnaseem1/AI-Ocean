@@ -15,7 +15,8 @@
     "created": "Created",
     "totalTickets": "Total\ntickets",
     "awaitingReply": "Awaiting\nreply",
-    "solvedTickets": "Solved\ntickets"
+    "solvedTickets": "Solved\ntickets",
+    "loadFailed": "Could not load your tickets. Try again in a moment."
   },
   "form": {
     "title": "New support ticket",
@@ -26,11 +27,15 @@
     "category": "Category",
     "message": "Message",
     "messagePlaceholder": "Describe the issue in as much detail as you can…",
-    "messageRequired": "Describe what you need help with"
+    "messageRequired": "Describe what you need help with",
+    "submitFailed": "Could not open the ticket. Try again in a moment."
   },
   "reply": {
     "notFound": "Ticket not found",
     "removed": "This ticket may have been removed.",
+    "loadFailed": "Could not load this ticket. Try again in a moment.",
+    "sendFailed": "Could not send your message. Try again in a moment.",
+    "statusFailed": "Could not update the ticket. Try again in a moment.",
     "back": "Back to tickets",
     "noReplyYet": "Our support team hasn't replied yet — you'll see their response here.",
     "placeholder": "Type your reply here…",

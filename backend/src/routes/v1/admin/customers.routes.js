@@ -17,6 +17,7 @@ const userDeletionService = require('../../../services/user/userDeletionService'
 const { adminAuth } = require('../../../middleware/auth');
 const { checkPermission, checkRole } = require('../../../middleware/security');
 const { getClientIP } = require('../../../utils/helpers/ipHelper');
+const { safeFilename } = require('../../../utils/helpers/csv');
 const { notifyCustomerStatusChange } = require('../../../services/notification/adminNotifier');
 const { byPublicIds } = require('../../../utils/helpers/publicId');
 
@@ -209,7 +210,10 @@ router.get('/:id/activity/export', adminAuth, checkPermission('customers.view'),
 
     const csv = csvRows.join('\n');
     const dateStr = new Date().toISOString().split('T')[0];
-    const filename = `customer_${ customer.name.replace(/\s+/g, '_')}_activity_${dateStr}.csv`;
+    // The customer's own name goes into the filename, so it is sanitised — a
+    // quote in it would close the quoted header value and the browser would
+    // save a truncated name.
+    const filename = safeFilename(`customer_${customer.name}_activity_${dateStr}.csv`, `customer_activity_${dateStr}.csv`);
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -374,6 +378,22 @@ router.get('/:id', adminAuth, checkPermission('customers.view'), async (req, res
     res.json({
       success: true,
       customer: customerResponse,
+      /*
+       * The customer's personal account, which is what actually owns their
+       * deployments and wallet. Returned so this page can carry account-level
+       * controls — automatic cloud provisioning, first — without a second
+       * round trip to work out which account a customer even is.
+       */
+      account: account
+        ? {
+          id: account.id,
+          name: account.name,
+          kind: account.kind,
+          autoDeploy: account.autoDeploy !== false,
+          autoDeployOffReason: account.autoDeployOffReason || '',
+          autoDeployChangedAt: account.autoDeployChangedAt || null,
+        }
+        : null,
       analytics: {
         totalDeployments,
         recentDeployments: deployments,

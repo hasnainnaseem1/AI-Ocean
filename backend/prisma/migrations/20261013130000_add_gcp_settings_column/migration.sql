@@ -1,0 +1,14 @@
+-- Where the Google Cloud credentials and provisioning switches live.
+--
+-- A separate migration from 20261013120000 rather than an edit to it: that one
+-- has already been applied, and Prisma records a checksum per migration — a
+-- file changed after the fact stops `migrate deploy` on every other machine
+-- with an error about modified history. An applied migration is a fact about
+-- what was run, not a document to keep tidy.
+--
+-- Nullable with no default. A settings row that predates this column reads as
+-- null, and `adminSettingsService` deep-merges the shipped defaults over it —
+-- which are "off, dry-run on, nobody allowlisted". An existing install
+-- therefore comes up unable to spend a cent until somebody deliberately
+-- changes three separate switches.
+ALTER TABLE "admin_settings" ADD COLUMN "gcp_settings" JSONB;

@@ -138,6 +138,66 @@ const settingsApi = {
     axiosInstance.put('/api/v1/admin/settings/polar', data).then((r) => r.data),
 
   /**
+   * PUT /api/v1/admin/settings/aws
+   * Update AWS provisioning settings (super_admin only).
+   *
+   * The secret access key is write-only: the server never sends it back, so
+   * omit the field entirely to keep whatever is stored.
+   */
+  updateAws: (data) =>
+    axiosInstance.put('/api/v1/admin/settings/aws', data).then((r) => r.data),
+
+  /**
+   * POST /api/v1/admin/settings/aws/test
+   * Verify the stored credentials reach AWS. Creates nothing.
+   */
+  testAws: () =>
+    axiosInstance.post('/api/v1/admin/settings/aws/test').then((r) => r.data),
+
+  /**
+   * GET /api/v1/admin/settings/cloud-regions
+   *
+   * Where a tier may be sold, and where a machine can actually be built.
+   * `common` is the regions every cloud can serve — the only safe set to offer
+   * in the catalogue, because a model can be moved between clouds at any time.
+   * `ready` is the subset whose infrastructure exists and whose cloud is on.
+   */
+  getCloudRegions: () =>
+    axiosInstance.get('/api/v1/admin/settings/cloud-regions').then((r) => r.data),
+
+  /**
+   * PUT /api/v1/admin/settings/cloud-routing
+   * Which cloud wins when more than one is on and a model is unassigned.
+   */
+  updateCloudRouting: (data) =>
+    axiosInstance.put('/api/v1/admin/settings/cloud-routing', data).then((r) => r.data),
+  /**
+   * PUT /api/v1/admin/settings/cloud-pricing
+   * Overhead, tax and the margin the platform needs — the four numbers that
+   * set the price floor under every tier.
+   */
+  updateCloudPricing: (data) =>
+    axiosInstance.put('/api/v1/admin/settings/cloud-pricing', data).then((r) => r.data),
+
+  /**
+   * PUT /api/v1/admin/settings/gcp
+   * Update Google Cloud provisioning settings (super_admin only).
+   *
+   * The service-account key is write-only: the server never sends it back, so
+   * omit the field entirely to keep whatever is stored. Sending an empty string
+   * does the same thing, but omitting it says so.
+   */
+  updateGcp: (data) =>
+    axiosInstance.put('/api/v1/admin/settings/gcp', data).then((r) => r.data),
+
+  /**
+   * POST /api/v1/admin/settings/gcp/test
+   * Verify the stored credentials can reach the project. Creates nothing.
+   */
+  testGcp: () =>
+    axiosInstance.post('/api/v1/admin/settings/gcp/test').then((r) => r.data),
+
+  /**
    * PUT /api/v1/admin/settings/payment-gateway
    * Set the active payment gateway (super_admin only)
    */

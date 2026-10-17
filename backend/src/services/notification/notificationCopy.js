@@ -98,6 +98,17 @@ const copy = {
     title: 'You were removed from an organization',
     message: 'You no longer have access to {teamName}.',
   },
+
+  /* ── Support tickets ── */
+
+  'support.ticketReplied': {
+    title: 'Support replied to your ticket',
+    message: 'Support replied to {ticketNumber} — "{subject}".',
+  },
+  'support.ticketResolved': {
+    title: 'Your ticket was marked resolved',
+    message: '{ticketNumber} — "{subject}" was marked resolved. If this did not fix it, just reply and it will reopen.',
+  },
   'deployment.approved': {
     title: 'Deployment approved',
     message: 'Your {modelName} deployment "{deploymentName}" was approved and is being set up.',

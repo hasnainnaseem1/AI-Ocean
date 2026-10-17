@@ -46,7 +46,13 @@ module.exports = [
         setInterval: 'readonly',
         clearInterval: 'readonly',
         URL: 'readonly',
+        URLSearchParams: 'readonly',
         fetch: 'readonly',
+        // Node 16+ globals. `AbortSignal.timeout()` is how the GCP client
+        // bounds a call — see services/gcp/gcpClient.js for why that one place
+        // has a timeout when nothing else here does.
+        AbortSignal: 'readonly',
+        AbortController: 'readonly',
       },
     },
     rules: {

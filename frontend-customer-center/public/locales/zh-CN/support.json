@@ -15,7 +15,8 @@
     "created": "创建时间",
     "totalTickets": "工单\n总数",
     "awaitingReply": "等待\n回复",
-    "solvedTickets": "已解决\n工单"
+    "solvedTickets": "已解决\n工单",
+    "loadFailed": "无法加载您的工单，请稍后重试。"
   },
   "form": {
     "title": "新建支持工单",
@@ -26,11 +27,15 @@
     "category": "类别",
     "message": "内容",
     "messagePlaceholder": "请尽可能详细地描述问题…",
-    "messageRequired": "请说明您需要什么帮助"
+    "messageRequired": "请说明您需要什么帮助",
+    "submitFailed": "无法创建工单，请稍后重试。"
   },
   "reply": {
     "notFound": "找不到该工单",
     "removed": "该工单可能已被删除。",
+    "loadFailed": "无法加载该工单，请稍后重试。",
+    "sendFailed": "无法发送您的消息，请稍后重试。",
+    "statusFailed": "无法更新工单，请稍后重试。",
     "back": "返回工单列表",
     "noReplyYet": "支持团队尚未回复 — 他们的回复会显示在这里。",
     "placeholder": "在此输入您的回复…",

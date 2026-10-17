@@ -34,6 +34,7 @@ const { byPublicId, byPublicIds } = require('../../utils/helpers/publicId');
 const {
   BILLABLE_STATUSES, STORAGE_BILLABLE_STATUSES, ACTIVE_STATUSES, TERMINAL_STATUSES,
   hasLiveAccess, applyDiscount, currentRateFor,
+  isComputeBillable, isStorageBillable, BILLABLE_WHERE,
 } = require('./deploymentConstants');
 
 const num = (d) => (d === null || d === undefined ? 0 : (typeof d === 'object' && d.toNumber ? d.toNumber() : Number(d)));
@@ -41,14 +42,33 @@ const num = (d) => (d === null || d === undefined ? 0 : (typeof d === 'object' &
 /**
  * Which statuses can follow which. Guards against nonsense transitions like
  * reviving a terminated deployment.
+ *
+ * ── Why `provisioning` can now be paused ──
+ *
+ * It could not be, for a good reason: a deployment being built by hand had no
+ * machine yet, so there was nothing to pause. With automatic provisioning there
+ * is — a real VM can be RUNNING on GCP, with the compute meter going, while the
+ * deployment is still `provisioning` because the model inside it is not
+ * configured yet.
+ *
+ * Every enforcement path that stops a machine for money (the hourly job's
+ * auto-suspend at zero balance, debt-limit enforcement, the billing job's
+ * stop-what-cannot-be-charged) moves a deployment to `paused`. If that move is
+ * illegal from `provisioning`, a customer whose balance runs out mid-setup
+ * keeps a machine the platform is paying Google for, and the enforcement throws
+ * instead of stopping it. So pausing has to reach there too.
+ *
+ * `paused -> provisioning` is the way back: resuming a deployment that was
+ * paused before it finished being built means finishing building it, not
+ * declaring it live.
  */
 const ALLOWED_TRANSITIONS = {
   pending_review: ['approved', 'rejected', 'terminated'],
   approved: ['provisioning', 'running', 'rejected', 'failed', 'terminated'],
   rejected: ['terminated'],
-  provisioning: ['running', 'failed', 'terminated'],
+  provisioning: ['running', 'paused', 'failed', 'terminated'],
   running: ['paused', 'stopped', 'failed', 'terminated'],
-  paused: ['running', 'stopped', 'terminated'],
+  paused: ['running', 'provisioning', 'stopped', 'terminated'],
   stopped: ['running', 'terminated'],
   failed: ['provisioning', 'terminated'],
   terminated: [],
@@ -102,6 +122,7 @@ const toDeploymentDoc = (row) => ({
     ramGb: num(row.tierRamGb),
     storageGb: num(row.tierStorageGb),
     storageType: row.tierStorageType,
+    networkGbps: num(row.tierNetworkGbps),
     // Built to order rather than picked off the catalogue. The parts list is
     // what the admin provisions from — nothing else records it.
     isCustom: !!row.tierIsCustom,
@@ -158,6 +179,9 @@ const toDeploymentDoc = (row) => ({
   provisionedAt: row.provisionedAt,
   startedAt: row.startedAt,
   lastBilledAt: row.lastBilledAt,
+  computeClockStartedAt: row.computeClockStartedAt,
+  // Frozen at creation and never recomputed — see schema.prisma.
+  cloudProvider: row.cloudProvider || null,
   stoppedAt: row.stoppedAt,
   terminatedAt: row.terminatedAt,
   totalRuntimeHours: num(row.totalRuntimeHours),
@@ -218,11 +242,11 @@ const wrapDeployment = (row) => {
   wrapped.effectiveRate = () => applyDiscount(wrapped.pricePerHour, wrapped.planDiscountPercent);
   wrapped.effectiveStoppedRate = () => applyDiscount(wrapped.stoppedPricePerHour, wrapped.planDiscountPercent);
   wrapped.currentRate = () => {
-    if (BILLABLE_STATUSES.includes(wrapped.status)) return wrapped.effectiveRate();
-    if (STORAGE_BILLABLE_STATUSES.includes(wrapped.status)) return wrapped.effectiveStoppedRate();
+    if (isComputeBillable(wrapped)) return wrapped.effectiveRate();
+    if (isStorageBillable(wrapped)) return wrapped.effectiveStoppedRate();
     return 0;
   };
-  wrapped.isBillable = () => BILLABLE_STATUSES.includes(wrapped.status) || STORAGE_BILLABLE_STATUSES.includes(wrapped.status);
+  wrapped.isBillable = () => isComputeBillable(wrapped) || isStorageBillable(wrapped);
   wrapped.isActive = () => ACTIVE_STATUSES.includes(wrapped.status);
   wrapped.hasLiveAccess = () => hasLiveAccess(wrapped);
   wrapped.isTerminal = () => TERMINAL_STATUSES.includes(wrapped.status);
@@ -290,6 +314,7 @@ const wrapDeployment = (row) => {
       tierRamGb: wrapped.tier.ramGb,
       tierStorageGb: wrapped.tier.storageGb,
       tierStorageType: wrapped.tier.storageType,
+      tierNetworkGbps: wrapped.tier.networkGbps || 0,
       tierIsCustom: !!wrapped.tier.isCustom,
       tierCustomBuild: wrapped.tier.customBuild ?? null,
       region: wrapped.region,
@@ -330,6 +355,8 @@ const wrapDeployment = (row) => {
       provisionedAt: wrapped.provisionedAt,
       startedAt: wrapped.startedAt,
       lastBilledAt: wrapped.lastBilledAt,
+      computeClockStartedAt: wrapped.computeClockStartedAt ?? null,
+      cloudProvider: wrapped.cloudProvider ?? null,
       stoppedAt: wrapped.stoppedAt,
       terminatedAt: wrapped.terminatedAt,
       totalRuntimeHours: wrapped.totalRuntimeHours,
@@ -456,10 +483,11 @@ const getBurnRatesFor = async (teamIds = []) => {
   const rows = await prisma.deployment.findMany({
     where: {
       teamId: byPublicIds(ids).id,
-      status: { in: [...BILLABLE_STATUSES, ...STORAGE_BILLABLE_STATUSES] },
+      ...BILLABLE_WHERE,
     },
     select: {
       status: true,
+      computeClockStartedAt: true,
       pricePerHour: true,
       stoppedPricePerHour: true,
       planDiscountPercent: true,
@@ -470,7 +498,7 @@ const getBurnRatesFor = async (teamIds = []) => {
   for (const d of rows) {
     const key = d.teamId;
     if (!key) continue;
-    const base = BILLABLE_STATUSES.includes(d.status) ? num(d.pricePerHour) : num(d.stoppedPricePerHour);
+    const base = isComputeBillable(d) ? num(d.pricePerHour) : num(d.stoppedPricePerHour);
     rates.set(key, (rates.get(key) || 0) + applyDiscount(base, num(d.planDiscountPercent)));
   }
 
@@ -497,11 +525,12 @@ const getBurnRateBreakdown = async (teamId, excludeId = null) => {
   const rows = await prisma.deployment.findMany({
     where: {
       teamId: byPublicId(teamId).id,
-      status: { in: [...BILLABLE_STATUSES, ...STORAGE_BILLABLE_STATUSES] },
+      ...BILLABLE_WHERE,
       ...(excludePg ? { id: { not: excludePg } } : {}),
     },
     select: {
-      status: true, pricePerHour: true, stoppedPricePerHour: true,
+      status: true, computeClockStartedAt: true,
+      pricePerHour: true, stoppedPricePerHour: true,
       planDiscountPercent: true, billingMethod: true,
     },
   });
@@ -535,7 +564,7 @@ const listByStatuses = async (statuses) => {
 /** Every deployment currently costing someone something — compute or storage. */
 const listBillable = async () => {
   const rows = await prisma.deployment.findMany({
-    where: { status: { in: [...BILLABLE_STATUSES, ...STORAGE_BILLABLE_STATUSES] } },
+    where: BILLABLE_WHERE,
     include: DEPLOYMENT_INCLUDE,
   });
   return rows.map(wrapDeployment);
@@ -567,7 +596,16 @@ const listPausedDebtLimitSuspended = (teamId) => listPausedFlagged(teamId, 'debt
  */
 const listRunningForTeam = async (teamId) => {
   const rows = await prisma.deployment.findMany({
-    where: { teamId: byPublicId(teamId).id, status: { in: BILLABLE_STATUSES } },
+    where: {
+      teamId: byPublicId(teamId).id,
+      OR: [
+        { status: { in: BILLABLE_STATUSES } },
+        // Real hardware is running even if the deployment has not been marked
+        // running yet. Enforcement has to reach it, or an account over its
+        // debt limit keeps a machine the platform is paying for.
+        { computeClockStartedAt: { not: null }, status: { notIn: TERMINAL_STATUSES } },
+      ],
+    },
     include: DEPLOYMENT_INCLUDE,
   });
   return rows.map(wrapDeployment);
@@ -764,6 +802,7 @@ const createDeployment = async (data) => {
         tierRamGb: data.tier?.ramGb || 0,
         tierStorageGb: data.tier?.storageGb || 0,
         tierStorageType: data.tier?.storageType || '',
+        tierNetworkGbps: data.tier?.networkGbps || 0,
         tierIsCustom: !!data.tier?.isCustom,
         tierCustomBuild: data.tier?.customBuild ?? null,
         region: data.region || 'default',
@@ -783,6 +822,9 @@ const createDeployment = async (data) => {
         sizingComputedAt: data.sizing?.computedAt || null,
         status: data.status || 'pending_review',
         idempotencyKey: data.idempotencyKey || null,
+        // The cloud this will be built on, decided by cloudRouter and frozen
+        // here. Null means the manual queue.
+        cloudProvider: data.cloudProvider || null,
         requirements: {
           create: requirements.map((r, i) => ({
             questionKey: r.questionKey, question: r.question || '', type: r.type || 'text', answer: r.answer ?? null, order: i,
@@ -1127,7 +1169,22 @@ const transition = async (deployment, newStatus, options = {}) => {
   // ── Billing watermarks ──
   if (newStatus === 'running') {
     if (!deployment.startedAt) deployment.startedAt = now;
-    deployment.lastBilledAt = now;
+    /*
+     * Moving the watermark forward writes off everything before it.
+     *
+     * That was correct while "running" and "a machine exists" were the same
+     * event. With automatic provisioning they are not: GCP reports the VM
+     * RUNNING, the compute clock starts there, and the deployment is marked
+     * `running` later — possibly much later, once the model inside it is
+     * configured. Setting the watermark to `now` at that point would hand the
+     * customer every hour in between for free, on hardware the platform has
+     * already paid Google for.
+     *
+     * So the watermark is only planted when nothing is already metering. When
+     * a clock is running, `billOutstanding` above has just settled up to this
+     * instant and `lastBilledAt` is already where it should be.
+     */
+    if (!deployment.computeClockStartedAt) deployment.lastBilledAt = now;
     deployment.autoSuspendedForCredit = false;
     deployment.debtLimitSuspended = false;
     deployment.cardGateSuspended = false;

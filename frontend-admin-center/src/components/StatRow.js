@@ -78,14 +78,24 @@ export const StatCard = ({
   return (
     <Col xs={xs} sm={sm} lg={span}>
       <div
-        className={className}
+        className={['stat-card', className].filter(Boolean).join(' ')}
         onClick={onClick}
         style={{
           ...card,
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'center',
+          /*
+           * Top-aligned, not centred.
+           *
+           * These cards stretch to the tallest in their row, so centring meant
+           * a card whose caption wrapped to two lines started HIGHER than its
+           * neighbours — in a row of four, the labels and the numbers sat at
+           * two different heights and the row stopped reading as one band. A
+           * KPI row is scanned across, so the things being compared have to
+           * line up; the slack belongs at the bottom, where nothing is.
+           */
+          justifyContent: 'flex-start',
           padding: '12px 14px',
           cursor: onClick ? 'pointer' : 'default',
           ...style,
@@ -108,7 +118,15 @@ export const StatCard = ({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              {/*
+                The figure never shrinks — it is text, and a number that is
+                squeezed is a number that is overlapped. It is the sparkline
+                that gives way, below.
+              */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto', whiteSpace: 'nowrap',
+              }}
+              >
                 <span
                   style={{
                     fontSize: ADMIN_DENSITY.statValueSize, fontWeight: 800,
@@ -126,7 +144,21 @@ export const StatCard = ({
                 )}
                 <DeltaChip delta={delta} />
               </div>
-              {chart}
+              {/*
+                Takes whatever room the figure leaves, up to 96px, and no more.
+                `minWidth: 0` is what lets it reach zero instead of holding its
+                intrinsic width and pushing into the number.
+              */}
+              {chart && (
+                <div
+                  className="stat-card-chart"
+                  style={{
+                    flex: '0 1 96px', minWidth: 0, display: 'flex', justifyContent: 'flex-end',
+                  }}
+                >
+                  {chart}
+                </div>
+              )}
             </div>
 
             {caption && (

@@ -25,6 +25,17 @@
       rel="stylesheet"
     />
     <title>Loading...</title>
+
+    <!--
+      First-party traffic tracking. Served by the backend so there is one copy
+      of the script for every surface, rather than one per React app.
+
+      `defer` so it never blocks rendering, and it asks the backend whether
+      tracking is switched on before it sends anything — an operator turning it
+      off in the admin centre takes effect immediately, with no rebuild. It
+      sets no cookie and stores nothing on the visitor's device.
+    -->
+    <script defer src="%REACT_APP_API_URL%/api/v1/public/track/tracker.js" data-site="marketing"></script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Typography, Grid } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import { MoonOutlined, SunOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
@@ -44,12 +45,32 @@ const AuthShell = ({ maxWidth = 440, title, subtitle, children }) => {
   const { t } = useTranslation('auth');
   const { isDark, toggleTheme } = useTheme();
   const { siteConfig } = useSite();
+  const navigate = useNavigate();
   const screens = Grid.useBreakpoint();
   const showBrandPanel = screens.md;
 
   const brand = getBrand(isDark);
   const siteName = siteConfig?.companyName || siteConfig?.siteName || t('shell.defaultSiteName');
   const tagline = siteConfig?.appTagline || t('shell.defaultTagline');
+
+  /*
+   * "Back to home" used to always leave the app for the public marketing
+   * site — right for someone who isn't signed in yet, wrong for this same
+   * shell's other use (team onboarding, reached from inside the app by an
+   * already-authenticated customer via "Create organization"). Going back
+   * there should mean back into the account they came from, not out to the
+   * marketing site while still logged in.
+   *
+   * `history.state.idx` is how React Router marks how many in-app entries
+   * deep the current page is (0 at the very first page this tab loaded), so
+   * it doubles as "is there anywhere in this app to go back to" without
+   * needing a route-by-route list of where each page might be reached from.
+   */
+  const hasAppHistory = (window.history.state?.idx ?? 0) > 0;
+  const goBack = () => {
+    if (hasAppHistory) navigate(-1);
+    else window.location.href = config.marketingUrl;
+  };
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', background: pageBg(isDark) }}>
@@ -59,17 +80,18 @@ const AuthShell = ({ maxWidth = 440, title, subtitle, children }) => {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '24px 32px 0',
         }}>
-          <a
-            href={config.marketingUrl}
+          <button
+            type="button"
+            onClick={goBack}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
               fontSize: 13.5, fontWeight: 500, color: isDark ? '#9BA1BC' : '#667085',
-              textDecoration: 'none',
+              textDecoration: 'none', background: 'none', border: 'none', padding: 0, cursor: 'pointer',
             }}
           >
             <ArrowLeftOutlined style={{ fontSize: 12 }} />
             {t('shell.backToHome')}
-          </a>
+          </button>
           {/*
             * The language switcher lives here on every screen size — this
             * corner was empty on desktop, and someone who cannot read English

@@ -213,11 +213,11 @@ module.exports = {
     subject: '{{title}} · {{siteName}}',
     body: `
       <h2 style="color: {{primaryColor}}; margin: 0 0 16px;">{{title}}</h2>
-      <p>नमस्ते {{name}},</p>
+      <p>नमस्ते {{userName}},</p>
       <p>{{message}}</p>
       {{actionBlock}}
       <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">
-        यह संदेश आपको {{siteName}} पर किसी संगठन की सदस्यता के कारण मिला है।
+        यह संदेश आपको {{siteName}} पर आपके खाते में हुई गतिविधि के कारण मिला है।
       </p>
     `,
   },

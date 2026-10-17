@@ -1,15 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import config from '../config';
 import { endsSession } from '../auth/sessionPolicy';
+import { getToken, getUser, setSession, updateStoredUser, clearSession } from '../auth/tokenStorage';
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('user')); } catch { return null; }
-  });
-  const [token, setToken] = useState(() => localStorage.getItem('token'));
-  const [loading, setLoading] = useState(!!localStorage.getItem('token'));
+  const [user, setUser] = useState(() => getUser());
+  const [token, setToken] = useState(() => getToken());
+  const [loading, setLoading] = useState(!!getToken());
 
   const fetchMe = useCallback(async (tk) => {
     if (!tk) { setLoading(false); return; }
@@ -21,7 +20,7 @@ export const AuthProvider = ({ children }) => {
       const data = await res.json();
       if (data.success) {
         setUser(data.user);
-        localStorage.setItem('user', JSON.stringify(data.user));
+        updateStoredUser(data.user);
       } else if (endsSession(res.status, data)) {
         logout();
       }
@@ -42,16 +41,17 @@ export const AuthProvider = ({ children }) => {
     fetchMe(token);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const login = (newToken, newUser) => {
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(newUser));
+  // `remember` defaults to true — unless the "Remember me" checkbox is
+  // actually unchecked, signing in should keep behaving exactly as it always
+  // has (session survives closing the browser).
+  const login = (newToken, newUser, remember = true) => {
+    setSession(newToken, newUser, remember);
     setToken(newToken);
     setUser(newUser);
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    clearSession();
     // The next person to sign in on this browser starts in their own
     // personal account, not in the previous person's team.
     localStorage.removeItem('cc_team');
@@ -62,7 +62,7 @@ export const AuthProvider = ({ children }) => {
 
   const updateUser = (updated) => {
     const merged = { ...user, ...updated };
-    localStorage.setItem('user', JSON.stringify(merged));
+    updateStoredUser(merged);
     setUser(merged);
   };
 

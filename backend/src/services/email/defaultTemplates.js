@@ -222,14 +222,18 @@ const defaults = {
     `,
   },
   teamNotification: {
+    // A generic wrapper — not just for team events. Any system notification
+    // whose sentence already exists as a bell `contentKey` (support tickets
+    // included) is sent through this same template, so its footer stays
+    // worded for "something happened on your account", not "your team".
     subject: '{{title}} · {{siteName}}',
     body: `
       <h2 style="color: {{primaryColor}}; margin: 0 0 16px;">{{title}}</h2>
-      <p>Hi {{name}},</p>
+      <p>Hi {{userName}},</p>
       <p>{{message}}</p>
       {{actionBlock}}
       <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">
-        You are receiving this because of your membership of an organization on {{siteName}}.
+        You are receiving this because of activity on your account at {{siteName}}.
       </p>
 `,
   },
@@ -332,7 +336,7 @@ const TEMPLATE_VARIABLES = {
   creditTopUp: ['userName', 'userEmail', 'siteName', 'logoUrl', 'primaryColor', 'secondaryColor', 'supportEmail', 'year', 'amount', 'balance', 'currency', 'paymentDate', 'walletUrl'],
   lowBalance: ['userName', 'userEmail', 'siteName', 'logoUrl', 'primaryColor', 'secondaryColor', 'supportEmail', 'year', 'balance', 'currency', 'burnRatePerDay', 'runwayDays', 'walletUrl'],
   teamInvite: ['siteName', 'logoUrl', 'primaryColor', 'secondaryColor', 'supportEmail', 'year', 'teamName', 'inviterName', 'roleName', 'acceptUrl', 'expiresDays'],
-  teamNotification: ['siteName', 'logoUrl', 'primaryColor', 'secondaryColor', 'supportEmail', 'year', 'name', 'title', 'message', 'actionBlock'],
+  teamNotification: ['userName', 'siteName', 'logoUrl', 'primaryColor', 'secondaryColor', 'supportEmail', 'year', 'title', 'message', 'actionBlock'],
 };
 
 module.exports = { defaults, getDefaults, TEMPLATE_KEYS, TEMPLATE_VARIABLES };

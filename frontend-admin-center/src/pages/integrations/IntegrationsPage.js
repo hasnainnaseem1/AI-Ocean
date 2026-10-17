@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Form, Input, Button, Typography, Row, Col, Switch, Spin,
   Tag, Space, message, Alert, Descriptions, Tooltip,
-  Modal, InputNumber, Radio,
+  Modal, InputNumber, Radio, Divider,
 } from 'antd';
 import {
   CreditCardOutlined, MailOutlined,
@@ -892,8 +892,8 @@ const StatusPill = ({ status, isDark }) => {
 /**
  * The card grid is a *front door*, not a re-implementation, for everything
  * except on/off. Every field this page writes for configuration still lives
- * in exactly one of the four Tab components above (StripeTab, LemonSqueezyTab,
- * EmailTab, GoogleSSOTab) — the grid only reads a summary via
+ * in exactly one of the Tab components above (StripeTab, LemonSqueezyTab,
+ * PolarTab, EmailTab, GoogleSSOTab) — the grid only reads a summary via
  * `settingsApi.getSettings()` (the same read-only call those tabs already
  * make independently) to paint an honest status pill and a details readout;
  * clicking through opens the real, unmodified panel to actually change
@@ -1139,11 +1139,15 @@ const IntegrationsPage = () => {
                   </Space>
                   <Space size={8}>
                     <StatusPill status={item.status} isDark={isDark} />
-                    <Tooltip title={!item.configured ? item.disabledReason : (item.checked ? 'Turn off' : 'Turn on')}>
+                    <Tooltip
+                      title={item.toggleHere === false
+                        ? item.toggleReason
+                        : (!item.configured ? item.disabledReason : (item.checked ? 'Turn off' : 'Turn on'))}
+                    >
                       <Switch
                         size="small"
                         checked={item.checked}
-                        disabled={!item.configured}
+                        disabled={item.toggleHere === false || !item.configured}
                         loading={togglingKey === item.key}
                         onChange={(checked) => handleToggle(item, checked)}
                       />

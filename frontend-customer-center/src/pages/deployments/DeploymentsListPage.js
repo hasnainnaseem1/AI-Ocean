@@ -23,6 +23,9 @@ import { useTranslation } from 'react-i18next';
 
 const { Title, Text } = Typography;
 
+/** The statuses a deployment can be "on hold" in — the only ones a pause reason applies to. */
+const ON_HOLD_STATUSES = ['paused', 'stopped'];
+
 /**
  * The status vocabulary, shared by this page, the deployment detail page and
  * the dashboard.
@@ -129,6 +132,10 @@ const DeploymentsListPage = () => {
    * line, which reads as more wrong than paused.
    */
   const pauseReason = (row) => {
+    // The flags outlive the pause — termination does not clear them — so a
+    // terminated deployment was still labelled "Paused — balance limit". A
+    // reason to be paused only means something while the deployment IS paused.
+    if (!ON_HOLD_STATUSES.includes(row.status)) return null;
     if (row.debtLimitSuspended) return t('deployments:list.debtLimitPaused');
     if (row.cardGateSuspended) return t('deployments:list.cardRequired');
     if (row.autoSuspendedForCredit) return t('deployments:list.outOfCredit');

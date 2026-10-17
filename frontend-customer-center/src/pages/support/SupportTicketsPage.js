@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Row, Col, Card, Table, Typography, Button, Input, Modal, Form, Select, Empty,
+  Row, Col, Card, Table, Typography, Button, Input, Modal, Form, Select, Empty, Alert, message,
 } from 'antd';
 import {
   PlusOutlined, SearchOutlined, CustomerServiceOutlined,
@@ -9,9 +9,10 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import StatusBadge from '../../components/StatusBadge';
 import { StatRow, StatCard } from '../../components/StatRow';
+import { TableRowsSkeleton } from '../../components/Skeletons';
 import { useTheme } from '../../context/ThemeContext';
 import { cardStyle as surfaceStyle } from '../../theme/colors';
-import { listTickets, createTicket } from '../../utils/ticketStore';
+import supportApi from '../../api/supportApi';
 import { TICKET_STATUS_META, CATEGORY_OPTIONS } from './ticketMeta';
 import { formatDate } from '../../utils/format';
 import { useTranslation } from 'react-i18next';
@@ -27,13 +28,29 @@ const SupportTicketsPage = () => {
   const card = surfaceStyle(isDark);
 
   const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [prefillMessage, setPrefillMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
 
-  const refresh = () => setTickets(listTickets());
-  useEffect(refresh, []);
+  const refresh = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
+    supportApi.list()
+      .then((data) => { setTickets(data.tickets || []); if (!silent) setError(null); })
+      .catch((err) => { if (!silent) setError(err.response?.data?.message || t('support:list.loadFailed')); })
+      .finally(() => { if (!silent) setLoading(false); });
+  }, [t]);
+  useEffect(() => refresh(), [refresh]);
+
+  // A reply landing on any of these tickets should move it in the list
+  // (and its stats) without the customer needing to reload the page.
+  useEffect(() => {
+    const interval = setInterval(() => refresh(true), 30000);
+    return () => clearInterval(interval);
+  }, [refresh]);
 
   const openNewTicketModal = () => {
     setPrefillMessage('');
@@ -61,7 +78,7 @@ const SupportTicketsPage = () => {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return tickets;
-    return tickets.filter((t) => t.subject.toLowerCase().includes(q) || t.id.toLowerCase().includes(q));
+    return tickets.filter((t) => t.subject.toLowerCase().includes(q) || t.number.toLowerCase().includes(q));
   }, [tickets, search]);
 
   const openCount = tickets.filter((t) => t.status !== 'solved').length;
@@ -69,21 +86,27 @@ const SupportTicketsPage = () => {
 
   const submitTicket = async () => {
     const values = await form.validateFields();
-    const ticket = createTicket(values);
-    form.resetFields();
-    setModalOpen(false);
-    refresh();
-    navigate(`/support/${ticket.id}`);
+    setSubmitting(true);
+    try {
+      const { ticket } = await supportApi.create(values);
+      form.resetFields();
+      setModalOpen(false);
+      navigate(`/support/${ticket.id}`);
+    } catch (err) {
+      message.error(err.response?.data?.message || t('support:form.submitFailed'));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const columns = [
     {
       title: t('support:list.ticketId'),
-      dataIndex: 'id',
+      dataIndex: 'number',
       width: 120,
-      render: (id) => (
-        <Button type="link" style={{ padding: 0, height: 'auto', fontWeight: 600 }} onClick={() => navigate(`/support/${id}`)}>
-          #{id}
+      render: (number, record) => (
+        <Button type="link" style={{ padding: 0, height: 'auto', fontWeight: 600 }} onClick={() => navigate(`/support/${record.id}`)}>
+          #{number}
         </Button>
       ),
     },
@@ -119,6 +142,8 @@ const SupportTicketsPage = () => {
         </Col>
       </Row>
 
+      {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 20, borderRadius: 12 }} />}
+
       <StatRow>
         <StatCard
           count={3} sm={8}
@@ -146,6 +171,9 @@ const SupportTicketsPage = () => {
         />
       </StatRow>
 
+      {loading ? (
+        <TableRowsSkeleton rows={5} />
+      ) : (
       <Card style={card} styles={{ body: { padding: 0 } }}>
         <div style={{ padding: '16px 20px', borderBottom: `1px solid ${isDark ? '#242942' : '#ECEFF8'}` }}>
           <Input
@@ -176,6 +204,7 @@ const SupportTicketsPage = () => {
           }}
         />
       </Card>
+      )}
 
       <Modal
         title={t('support:form.title')}
@@ -183,6 +212,7 @@ const SupportTicketsPage = () => {
         onCancel={() => setModalOpen(false)}
         onOk={submitTicket}
         okText={t('support:form.submit')}
+        confirmLoading={submitting}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>

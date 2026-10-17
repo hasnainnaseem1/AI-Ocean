@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout';
 import ProtectedRoute from './components/guards/ProtectedRoute';
 import RouteGuard from './components/guards/RouteGuard';
@@ -18,8 +18,12 @@ const CustomersListPage = lazy(() => import('./pages/customers/CustomersListPage
 const CustomerDetailPage = lazy(() => import('./pages/customers/CustomerDetailPage'));
 const TeamsListPage = lazy(() => import('./pages/teams/TeamsListPage'));
 const TeamDetailPage = lazy(() => import('./pages/teams/TeamDetailPage'));
+const SupportTicketsListPage = lazy(() => import('./pages/support/SupportTicketsListPage'));
+const SupportTicketDetailPage = lazy(() => import('./pages/support/SupportTicketDetailPage'));
 const RolesListPage = lazy(() => import('./pages/roles/RolesListPage'));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+// The analytics domains are lazily loaded by AnalyticsPage itself, one per
+// tab, and the policy editor is a section of the Settings page.
 const LogsListPage = lazy(() => import('./pages/logs/LogsListPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const DepartmentsPage = lazy(() => import('./pages/settings/DepartmentsPage'));
@@ -32,6 +36,9 @@ const RecommendationPolicyListPage = lazy(() => import('./pages/catalog/Recommen
 const RecommendationPolicyFormPage = lazy(() => import('./pages/catalog/RecommendationPolicyFormPage'));
 const AdminDeploymentsListPage = lazy(() => import('./pages/deployments/DeploymentsListPage'));
 const AdminDeploymentDetailPage = lazy(() => import('./pages/deployments/DeploymentDetailPage'));
+const AdminCloudOverviewPage = lazy(() => import('./pages/cloud/CloudOverviewPage'));
+const AdminGoogleCloudPage = lazy(() => import('./pages/cloud/GoogleCloudPage'));
+const AdminAwsPage = lazy(() => import('./pages/cloud/AwsPage'));
 const WalletsPage = lazy(() => import('./pages/billing/WalletsPage'));
 const ReceivablesPage = lazy(() => import('./pages/billing/ReceivablesPage'));
 const MarketingPagesListPage = lazy(() => import('./pages/marketing/MarketingPagesListPage'));
@@ -73,6 +80,12 @@ function App() {
           <Route path="recommendation-policy/:id/edit" element={<RouteGuard permission={PERMISSIONS.MODELS_VIEW}><RecommendationPolicyFormPage /></RouteGuard>} />
           <Route path="deployments" element={<RouteGuard permission={PERMISSIONS.DEPLOYMENTS_VIEW}><AdminDeploymentsListPage /></RouteGuard>} />
           <Route path="deployments/:id" element={<RouteGuard permission={PERMISSIONS.DEPLOYMENTS_VIEW}><AdminDeploymentDetailPage /></RouteGuard>} />
+          <Route path="cloud" element={<RouteGuard permission={PERMISSIONS.DEPLOYMENTS_VIEW}><AdminCloudOverviewPage /></RouteGuard>} />
+          <Route path="cloud/gcp" element={<RouteGuard permission={PERMISSIONS.DEPLOYMENTS_VIEW}><AdminGoogleCloudPage /></RouteGuard>} />
+          <Route path="cloud/aws" element={<RouteGuard permission={PERMISSIONS.DEPLOYMENTS_VIEW}><AdminAwsPage /></RouteGuard>} />
+          {/* The orphans list moved into the Google Cloud page. Kept so an old
+              link or a notification sent before the move still lands somewhere. */}
+          <Route path="cloud-orphans" element={<Navigate to="/cloud/gcp?tab=orphans" replace />} />
           <Route path="wallets" element={<RouteGuard permission={PERMISSIONS.BILLING_VIEW}><WalletsPage /></RouteGuard>} />
           <Route path="receivables" element={<RouteGuard permission={PERMISSIONS.BILLING_VIEW}><ReceivablesPage /></RouteGuard>} />
           <Route path="marketing/pages" element={<RouteGuard permission={PERMISSIONS.SETTINGS_VIEW}><MarketingPagesListPage /></RouteGuard>} />
@@ -90,8 +103,22 @@ function App() {
           <Route path="customers/:id" element={<RouteGuard permission={PERMISSIONS.CUSTOMERS_VIEW}><CustomerDetailPage /></RouteGuard>} />
           <Route path="teams" element={<RouteGuard permission={PERMISSIONS.CUSTOMERS_VIEW}><TeamsListPage /></RouteGuard>} />
           <Route path="teams/:id" element={<RouteGuard permission={PERMISSIONS.CUSTOMERS_VIEW}><TeamDetailPage /></RouteGuard>} />
+          <Route path="support-tickets" element={<RouteGuard permission={PERMISSIONS.SUPPORT_VIEW}><SupportTicketsListPage /></RouteGuard>} />
+          <Route path="support-tickets/:id" element={<RouteGuard permission={PERMISSIONS.SUPPORT_VIEW}><SupportTicketDetailPage /></RouteGuard>} />
           <Route path="roles" element={<RouteGuard permission={PERMISSIONS.ROLES_VIEW}><RolesListPage /></RouteGuard>} />
+          {/*
+            One page, eight tabs, and the tab in the URL.
+            `/analytics/retention` is the Retention tab, which is also the URL
+            it had when it was a route of its own — so every bookmark and deep
+            link from before the move still lands where it did, and the back
+            button steps through tabs. Each tab is still lazily loaded, so a
+            domain nobody opens is never downloaded.
+            Permissions are enforced per tab inside the page (money needs
+            `analytics.revenue`, the export tab needs `analytics.export`); the
+            guard here is the floor everything shares.
+          */}
           <Route path="analytics" element={<RouteGuard permission={PERMISSIONS.ANALYTICS_VIEW}><AnalyticsPage /></RouteGuard>} />
+          <Route path="analytics/:tab" element={<RouteGuard permission={PERMISSIONS.ANALYTICS_VIEW}><AnalyticsPage /></RouteGuard>} />
           <Route path="logs" element={<RouteGuard permission={PERMISSIONS.LOGS_VIEW}><LogsListPage /></RouteGuard>} />
           <Route path="settings" element={<RouteGuard permission={PERMISSIONS.SETTINGS_VIEW}><SettingsPage /></RouteGuard>} />
           <Route path="departments" element={<RouteGuard permission={PERMISSIONS.SETTINGS_VIEW}><DepartmentsPage /></RouteGuard>} />

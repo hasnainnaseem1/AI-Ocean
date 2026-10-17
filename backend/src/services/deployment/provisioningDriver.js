@@ -86,23 +86,64 @@ const manualDriver = {
   },
 };
 
+/**
+ * `gcp` is required lazily, inside the getter, rather than at the top of this
+ * file. It pulls in the Compute client, the spec mapper and Prisma; a platform
+ * running on the manual driver — which is every platform until an operator says
+ * otherwise — should not load any of that to answer "who fulfils deployments".
+ */
 const DRIVERS = {
   manual: manualDriver,
+  get gcp() {
+    return require('../gcp/gcpDriver');
+  },
+  get aws() {
+    return require('../aws/awsDriver');
+  },
 };
 
 /**
- * Resolve the driver the platform owner has selected.
+ * Resolve the driver for a deployment that ALREADY EXISTS.
  *
- * Falls back to `manual` for anything unknown — including a settings read that
- * fails — because the manual driver is the one that assumes least. Guessing
- * that some automated driver is present when it isn't would silently drop the
- * human task and leave endpoints running.
+ * ── Why this takes a deployment ──
+ *
+ * There is more than one cloud now, so "which driver" is no longer a platform
+ * setting — it is a fact about the deployment, frozen onto it when it was
+ * created. Suspending, resuming or terminating reads that frozen value.
+ *
+ * It must never be re-derived from the model's current assignment. An admin
+ * moving a model from AWS to Google is routine; if terminate re-derived the
+ * cloud it would send the destroy order to Google for a machine living in AWS.
+ * Google answers "no such instance", the platform marks it gone, and the AWS
+ * machine keeps running and keeps billing with nothing watching it.
+ *
+ * `cloudRouter.cloudOf` takes the deployment and nothing else, so that
+ * re-deriving is not merely discouraged but unavailable.
+ *
+ * Falls back to `manual` for anything unknown — a deployment from before the
+ * column existed, a cloud this build does not have a driver for, a settings
+ * read that failed — because the manual driver is the one that assumes least.
+ * Pretending an automated driver is present when it isn't would silently drop
+ * the human task and leave a machine running.
+ *
+ * @param {object} [deployment] the deployment being acted on. Omitting it is
+ *   only correct for callers asking "is automatic provisioning available at
+ *   all", and gives the manual driver.
  */
-const getDriver = async () => {
+const getDriver = async (deployment = null) => {
   try {
-const adminSettingsService = require('../admin/adminSettingsService');
-    const settings = await adminSettingsService.getSettings();
-    const name = settings?.deploymentSettings?.provisioningDriver || 'manual';
+    const { cloudOf, MANUAL } = require('../cloud/cloudRouter');
+
+    const name = deployment ? cloudOf(deployment) : MANUAL;
+
+    /*
+     * `Object.hasOwn` rather than a truthiness test on `DRIVERS[name]`: the
+     * getter above would be *invoked* by the lookup, so an unknown name must be
+     * rejected before anything is resolved. It also keeps a name like
+     * "constructor" or "toString" from resolving to something off
+     * Object.prototype and being returned as a driver.
+     */
+    if (!Object.hasOwn(DRIVERS, name)) return manualDriver;
     return DRIVERS[name] || manualDriver;
   } catch (err) {
     console.error('[Provisioning] Could not resolve driver, using manual:', err.message);
@@ -119,7 +160,10 @@ const adminSettingsService = require('../admin/adminSettingsService');
  * to look at this", which is exactly how a real failure should be treated.
  */
 const run = async (action, deployment) => {
-  const driver = await getDriver();
+  // The deployment's OWN cloud, not the platform's current preference. This
+  // one argument is what keeps a terminate going to the provider the machine
+  // actually lives on.
+  const driver = await getDriver(deployment);
 
   if (typeof driver[action] !== 'function') {
     return {

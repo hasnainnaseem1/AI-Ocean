@@ -12,7 +12,7 @@ const prisma = require('../../lib/prismaClient');
 const { pgId } = require('./pgLookup');
 const { byPublicId } = require('../../utils/helpers/publicId');
 const {
-  BILLABLE_STATUSES, STORAGE_BILLABLE_STATUSES, currentRateFor,
+  currentRateFor, isComputeBillable, BILLABLE_WHERE,
 } = require('./deploymentConstants');
 
 const num = (d) => (d === null || d === undefined ? 0 : (typeof d === 'object' && d.toNumber ? d.toNumber() : Number(d)));
@@ -226,11 +226,11 @@ const summariseForTeam = async (teamId, from, to, options = {}) => {
       ? prisma.deployment.findMany({
         where: {
           teamId: byPublicId(teamId).id,
-          status: { in: [...BILLABLE_STATUSES, ...STORAGE_BILLABLE_STATUSES] },
+          ...BILLABLE_WHERE,
         },
         select: {
           id: true, deploymentName: true, status: true, modelName: true, tierName: true,
-          lastBilledAt: true, startedAt: true,
+          lastBilledAt: true, startedAt: true, computeClockStartedAt: true,
           pricePerHour: true, stoppedPricePerHour: true, planDiscountPercent: true,
         },
       })
@@ -470,7 +470,7 @@ const summariseForTeam = async (teamId, from, to, options = {}) => {
     const entry = entryFor(d.id, d);
     entry.status = d.status;
     entry.unbilled = {
-      kind: BILLABLE_STATUSES.includes(d.status) ? 'running' : 'storage',
+      kind: isComputeBillable(d) ? 'running' : 'storage',
       hours: round4(hours),
       rate,
       cost: roundMoney(rate * hours),

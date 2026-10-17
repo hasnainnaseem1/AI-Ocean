@@ -100,6 +100,16 @@ const readStoredCollapsed = () => {
   }
 };
 
+/**
+ * The floating support-chat button and its panel.
+ *
+ * Switched off: the chatbot is not being built yet, and a launcher that opens
+ * a panel saying "live chat isn't connected" is worse than no launcher. The
+ * widget is left in place rather than deleted — set this to `true` to bring
+ * it back unchanged. Support is reached through Support Tickets meanwhile.
+ */
+const CHAT_WIDGET_ENABLED = false;
+
 const AppLayout = () => {
   const navigate       = useNavigate();
   const location       = useLocation();
@@ -236,8 +246,6 @@ const AppLayout = () => {
     // that flag is off would be a nav item that only ever 403s.
     ...(catalogEnabled     ? [{ key: '/machines',    icon: <HddOutlined />,          label: t('item.machineTypes') }] : []),
     ...(deploymentsEnabled ? [{ key: '/deployments', icon: <CloudServerOutlined />,  label: t('item.deployments'), count: deploymentCount }] : []),
-    // The team's members and invitations — only inside a team.
-    ...(!isPersonal && can('team.view') ? [{ key: '/team', icon: <TeamOutlined />, label: tt('menu.teamSettings') }] : []),
   ];
 
   const supportItems = [
@@ -255,11 +263,19 @@ const AppLayout = () => {
       { key: 'limits', icon: <ControlOutlined />, label: t('item.usageLimits'), onClick: () => navigate('/limits') },
       { key: 'billing', icon: <CreditCardOutlined />, label: t('item.billing'), onClick: () => navigate('/billing') },
     ] : []),
-    // Anyone can start an organization later — the signup question was never
-    // a one-way door. Shown only while the admin has teams switched on.
-    ...(siteConfig?.teams?.enabled ? [{
-      key: 'create-org', icon: <TeamOutlined />, label: tt('menu.createOrganization'), onClick: () => navigate('/onboarding/team'),
-    }] : []),
+    // The same slot does two different jobs depending which account is
+    // active: on Personal, an offer to start an organization (never a
+    // one-way door — anyone can do this later); inside one already, the
+    // link to manage it (members, invitations — moved here from the
+    // sidebar, since "team settings" for one specific account reads oddly
+    // as a permanent item in a nav that stays the same across accounts).
+    ...(isPersonal
+      ? (siteConfig?.teams?.enabled ? [{
+        key: 'create-org', icon: <TeamOutlined />, label: tt('menu.createOrganization'), onClick: () => navigate('/onboarding/team'),
+      }] : [])
+      : (can('team.view') ? [{
+        key: 'team-settings', icon: <TeamOutlined />, label: tt('menu.teamSettings'), onClick: () => navigate('/team'),
+      }] : [])),
   ];
 
   const surfaceBg   = isDark ? SURFACE.siderBgDark : SURFACE.siderBgLight;
@@ -861,7 +877,7 @@ const AppLayout = () => {
            ready now; wiring it to a real conversation is a backend task for
            later, so the composer stays visibly not-yet-live rather than
            pretending to send. ── */}
-      {chatOpen && (
+      {CHAT_WIDGET_ENABLED && chatOpen && (
         <div style={{
           position: 'fixed', right: 24, bottom: 92, zIndex: 1000,
           width: 340, maxHeight: 480, display: 'flex', flexDirection: 'column',
@@ -934,21 +950,23 @@ const AppLayout = () => {
         </div>
       )}
 
-      <Tooltip title={chatOpen ? '' : 'Chat with support'} placement="left">
-        <Button
-          shape="circle"
-          className="no-print"
-          onClick={() => setChatOpen((v) => !v)}
-          icon={chatOpen ? <CloseOutlined /> : <MessageOutlined />}
-          style={{
-            position: 'fixed', right: 24, bottom: 24, zIndex: 1000,
-            width: 52, height: 52, minWidth: 52,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: GRADIENT, border: 'none', color: '#fff', fontSize: 19,
-            boxShadow: '0 6px 20px rgba(79,107,237,0.38)',
-          }}
-        />
-      </Tooltip>
+      {CHAT_WIDGET_ENABLED && (
+        <Tooltip title={chatOpen ? '' : 'Chat with support'} placement="left">
+          <Button
+            shape="circle"
+            className="no-print"
+            onClick={() => setChatOpen((v) => !v)}
+            icon={chatOpen ? <CloseOutlined /> : <MessageOutlined />}
+            style={{
+              position: 'fixed', right: 24, bottom: 24, zIndex: 1000,
+              width: 52, height: 52, minWidth: 52,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: GRADIENT, border: 'none', color: '#fff', fontSize: 19,
+              boxShadow: '0 6px 20px rgba(79,107,237,0.38)',
+            }}
+          />
+        </Tooltip>
+      )}
     </Layout>
   );
 };

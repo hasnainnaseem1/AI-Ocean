@@ -10,10 +10,23 @@ const app = express();
 // MIDDLEWARE
 // ==========================================
 
-// CORS
+/*
+ * CORS
+ *
+ * `exposedHeaders` is load-bearing, not tidying. The three frontends run on
+ * their own origins, and a browser hands JavaScript only the handful of
+ * response headers CORS calls "simple" — `Content-Disposition` is not one of
+ * them. Every download on this platform (CSV exports in the admin centre,
+ * invoice PDFs in the customer centre) sends the filename in that header and
+ * reads it back in the fetch that saves the file. Without this line the read
+ * returns nothing and each one falls back to a generic name, so two exports
+ * covering different windows, or two invoices, arrive indistinguishable. The
+ * failure is quiet: a file does download, and it looks right.
+ */
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
-  credentials: true
+  credentials: true,
+  exposedHeaders: ['Content-Disposition']
 }));
 
 // Body Parsers

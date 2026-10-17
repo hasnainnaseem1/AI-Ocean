@@ -216,11 +216,11 @@ module.exports = {
     subject: '{{title}} · {{siteName}}',
     body: `
       <h2 style="color: {{primaryColor}}; margin: 0 0 16px;">{{title}}</h2>
-      <p>Hola {{name}}:</p>
+      <p>Hola {{userName}}:</p>
       <p>{{message}}</p>
       {{actionBlock}}
       <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">
-        Recibes esto por tu pertenencia a una organización en {{siteName}}.
+        Recibes esto por actividad en tu cuenta en {{siteName}}.
       </p>
     `,
   },

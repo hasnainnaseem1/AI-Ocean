@@ -20,11 +20,11 @@ const { canSeeMoney, canTerminate } = require('../../services/team/permissions')
 const creditService = require('../../services/billing/creditService');
 const debtService = require('../../services/billing/debtService');
 const paymentMethodService = require('../../services/billing/paymentMethodService');
-const { daysSince } = require('../../services/billing/collectionSchedule');
+const { daysSince, storageUnpaidSince } = require('../../services/billing/collectionSchedule');
 const { billingCopy } = require('../../services/billing/copyTemplates');
 const deploymentService = require('../../services/deployment/deploymentService');
 const deploymentUsageService = require('../../services/deployment/deploymentUsageService');
-const { hasLiveAccess } = require('../../services/deployment/deploymentConstants');
+const { hasLiveAccess, STORAGE_BILLABLE_STATUSES } = require('../../services/deployment/deploymentConstants');
 const journeyService = require('../../services/deployment/journeyService');
 const recommendation = require('../../services/recommendation');
 const { cryptoHelper } = require('../../utils/helpers');
@@ -284,12 +284,28 @@ const getCheckoutOptions = async (req, res) => {
     const discountPercent = await billingModeService.getPlanDiscount(req.user);
     const effectiveRate = round4(listRate * (1 - discountPercent / 100));
 
-    const [wallet, currentBurn, debt, hasVerifiedCard] = await Promise.all([
+    const [wallet, currentBurn, debt] = await Promise.all([
       creditService.getOrCreateWallet(req.team.id),
       deploymentService.getBurnRate(req.team.id),
       debtService.status(req.team.id, { settings }),
-      paymentMethodService.hasVerifiedCard(req.team.id),
     ]);
+
+    /*
+     * A card saved through Polar's hosted portal reaches our database only when
+     * somebody asks the gateway what the customer has on file (there is no
+     * "card saved" webhook). The checkout is the moment that matters: the
+     * customer adds a card in the portal, comes back to this screen, and this
+     * is the call that has to notice it — otherwise they would be told "add a
+     * card" about a card they just added. Only asked of the gateway when none
+     * is on file, so the common case costs nothing extra.
+     */
+    let hasVerifiedCard = await paymentMethodService.hasVerifiedCard(req.team.id);
+    if (!hasVerifiedCard) {
+      await paymentMethodService.syncFromGateway(req.team, req.user).catch((err) => {
+        console.error('[Checkout] Card sync failed (non-fatal):', err.message);
+      });
+      hasVerifiedCard = await paymentMethodService.hasVerifiedCard(req.team.id);
+    }
 
     const requiredBalance = round4((currentBurn + effectiveRate) * (settings.minHoursBalanceToDeploy || 0));
     // Dispute hold, PAYG access and account age belong to the account that
@@ -650,27 +666,58 @@ const createDeployment = async (req, res) => {
       throw err;
     }
 
-    // Tell the admins there's something in the fulfillment queue
+    /*
+     * ── Build it now, if the platform is set up to ──
+     *
+     * The one caller of `provisioningDriver.provision`. On every install where
+     * automatic provisioning is off — which is all of them until an operator
+     * turns it on, and then only for allowlisted teams — this returns
+     * `attempted: false` immediately and the deployment goes to the fulfilment
+     * queue exactly as before.
+     *
+     * It is awaited rather than fired and forgotten. Not for the API call,
+     * which takes about a second, but because the customer's own response must
+     * not claim "our team will review it" when the platform has already built
+     * the machine. The service is written so that it cannot throw; the guard
+     * here is belt and braces for the request path.
+     */
+    let autoProvision = { attempted: false, provisioned: false };
     try {
-      const notificationService = require('../../services/notification/notificationService');
-      const userService = require('../../services/user/userService');
-      const admins = await userService.listActiveAdmins();
-      const adminUrl = process.env.ADMIN_FRONTEND_URL || 'http://localhost:3003';
-
-      await notificationService.createMany(
-        admins.map((admin) => ({
-          recipientId: admin.id,
-          recipientType: 'admin',
-          type: 'deployment_requested',
-          title: 'New deployment request',
-          message: `${req.user.name} requested ${model.name} on ${machine.name} (${deployment.currency} ${effectiveRate}/hr)`,
-          priority: 'high',
-          action: { label: 'Review Request', url: `${adminUrl}/deployments/${deployment.id}` },
-          metadata: { deploymentId: deployment.id, customerId: req.user.id },
-        }))
-      );
+      autoProvision = await require('../../services/gcp/autoProvisionService')
+        .onDeploymentCreated(deployment);
     } catch (err) {
-      console.error('[Deployment] Failed to notify admins:', err.message);
+      console.error('[Deployment] Automatic provisioning threw, leaving it for the queue:', err.message);
+    }
+
+    /*
+     * Tell the admins there is something in the fulfilment queue.
+     *
+     * Skipped when the machine was built automatically — autoProvisionService
+     * has already sent a notification saying so, and two for one deployment
+     * (one asking for a review that is not needed) is worse than one.
+     */
+    if (!autoProvision.provisioned) {
+      try {
+        const notificationService = require('../../services/notification/notificationService');
+        const userService = require('../../services/user/userService');
+        const admins = await userService.listActiveAdmins();
+        const adminUrl = process.env.ADMIN_FRONTEND_URL || 'http://localhost:3003';
+
+        await notificationService.createMany(
+          admins.map((admin) => ({
+            recipientId: admin.id,
+            recipientType: 'admin',
+            type: 'deployment_requested',
+            title: 'New deployment request',
+            message: `${req.user.name} requested ${model.name} on ${machine.name} (${deployment.currency} ${effectiveRate}/hr)`,
+            priority: 'high',
+            action: { label: 'Review Request', url: `${adminUrl}/deployments/${deployment.id}` },
+            metadata: { deploymentId: deployment.id, customerId: req.user.id },
+          }))
+        );
+      } catch (err) {
+        console.error('[Deployment] Failed to notify admins:', err.message);
+      }
     }
 
     await activityLogService.logActivity({
@@ -695,7 +742,14 @@ const createDeployment = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Deployment requested. Our team will review it shortly.',
+      /*
+       * Two different truths, so two different sentences. Telling a customer
+       * their request is under review when a machine is already being built
+       * would have them waiting for an email that is never coming.
+       */
+      message: autoProvision.provisioned
+        ? 'Deployment requested. Your machine is being prepared.'
+        : 'Deployment requested. Our team will review it shortly.',
       deployment: serializeFor(req, deployment, { full: true }),
     });
   } catch (error) {
@@ -764,12 +818,14 @@ const getDeployment = async (req, res) => {
  * How many days are left before this deployment's unpaid storage is
  * released — the same grace period debtCollection.js counts down, computed
  * here so the customer can see it coming rather than discover it as a
- * termination notice. Grace is tracked account-wide (from `wallet.debtSince`,
- * not per-deployment), so this is null unless the deployment itself is
- * actually carrying unpaid storage right now.
+ * termination notice. Grace counts from when this deployment's storage went
+ * unpaid (see `storageUnpaidSince`), and this is null unless the deployment
+ * itself is actually carrying unpaid storage right now.
  */
 const buildStorageGraceInfo = async (deployment) => {
-  if (!deployment.hasUnpaidStorage) return null;
+  // The flag is not cleared by termination, so a terminated deployment would
+  // otherwise still be counting down to a termination that already happened.
+  if (!deployment.hasUnpaidStorage || !STORAGE_BILLABLE_STATUSES.includes(deployment.status)) return null;
 
   const [wallet, settings] = await Promise.all([
     creditService.getOrCreateWallet(deployment.teamId),
@@ -777,11 +833,19 @@ const buildStorageGraceInfo = async (deployment) => {
   ]);
 
   const graceDays = settings.storageGrace?.graceDays ?? 7;
-  const debtDays = daysSince(wallet.debtSince, new Date());
+  // The same clock debtCollection.js terminates by — counted from when THIS
+  // deployment's storage went unpaid, not from when the account first owed
+  // anything — so the number the customer sees is the number that is acted on.
+  const unpaidSince = storageUnpaidSince({
+    debtSince: wallet.debtSince,
+    statusHistory: deployment.statusHistory,
+    storageStatuses: STORAGE_BILLABLE_STATUSES,
+  });
+  const elapsed = daysSince(unpaidSince, new Date());
 
   return {
     enabled: !!settings.storageGrace?.enabled,
-    daysRemaining: Math.max(0, graceDays - debtDays),
+    daysRemaining: Math.max(0, graceDays - elapsed),
     graceDays,
     message: billingCopy(settings, 'storageDebtMessage', {
       deploymentName: deployment.deploymentName,

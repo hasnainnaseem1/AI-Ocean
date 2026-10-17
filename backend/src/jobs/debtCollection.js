@@ -1,8 +1,8 @@
 /**
  * Debt Collection Job
  *
- * Runs once a day and closes the loop the rest of the billing system
- * deliberately leaves open:
+ * Runs every hour — see jobs/index.js for why it is no longer once a night —
+ * and closes the loop the rest of the billing system deliberately leaves open:
  *
  *   - pay-as-you-go never pauses for balance on its own (deploymentBilling)
  *     — so something has to eventually act on debt that isn't getting paid
@@ -28,6 +28,7 @@ const deploymentService = require('../services/deployment/deploymentService');
 const adminNotifier = require('../services/notification/adminNotifier');
 const debtEnforcement = require('../services/billing/debtEnforcement');
 const teamService = require('../services/team/teamService');
+const { STORAGE_BILLABLE_STATUSES } = require('../services/deployment/deploymentConstants');
 
 /**
  * One notification per recipient. Account-level money events (a collection,
@@ -88,8 +89,6 @@ const processDebtAccounts = async (settings, now) => {
 
   for (const wallet of wallets) {
     try {
-      const debtDays = schedule.daysSince(wallet.debtSince, now);
-
       const status = debtService.evaluateDebtStatus({
         outstanding: wallet.outstandingBalance,
         debtSince: wallet.debtSince,
@@ -106,8 +105,8 @@ const processDebtAccounts = async (settings, now) => {
       const threshold = settings.payg?.autoChargeThreshold ?? 0;
       if (wallet.outstandingBalance < threshold) continue;
 
-      if (!schedule.shouldAttemptChargeToday({
-        debtDays,
+      if (!schedule.shouldAttemptCharge({
+        debtSince: wallet.debtSince,
         lastAutoChargeAt: wallet.lastAutoChargeAt,
         now,
         autoChargeRetryDays: settings.payg?.autoChargeRetryDays || [],
@@ -184,40 +183,53 @@ const runStorageGrace = async (settings, now) => {
     try {
       const wallet = wallets.get(String(deployment.teamId))
         || await creditService.getOrCreateWallet(deployment.teamId);
-      const debtDays = schedule.daysSince(wallet.debtSince, now);
 
-      if (schedule.graceExpired({ debtDays, graceDays: settings.storageGrace.graceDays })) {
-        if (settings.storageGrace.terminateAtEnd) {
-          await deploymentService.transition(deployment, 'terminated', {
-            note: 'Automatically terminated — unpaid storage exceeded the grace period. '
-              + 'The outstanding balance is not affected and remains owed.',
-            at: now,
-          });
-          await notifyCustomer({
-            userId: deployment.userId,
-            type: 'deployment_suspended',
-            contentKey: 'storage.terminated',
-            title: 'Deployment terminated — unpaid storage',
-            message: `"${deployment.deploymentName}" was terminated because its storage went unpaid `
-              + `for more than ${settings.storageGrace.graceDays} days. Any outstanding balance is still owed.`,
-            metadata: {
-              deploymentName: deployment.deploymentName,
-              graceDays: settings.storageGrace.graceDays,
-            },
-            priority: 'urgent',
-          });
-          terminated += 1;
-        }
-        continue;
-      }
-
-      if (schedule.shouldSendGraceWarningToday({
-        debtDays,
+      const { action, daysLeft } = schedule.storageGraceAction({
+        unpaidSince: schedule.storageUnpaidSince({
+          debtSince: wallet.debtSince,
+          statusHistory: deployment.statusHistory,
+          storageStatuses: STORAGE_BILLABLE_STATUSES,
+        }),
+        graceDays: settings.storageGrace.graceDays,
         warnDailyFrom: settings.storageGrace.warnDailyFrom,
         lastWarnedAt: deployment.storageGraceWarnedAt,
         now,
-      })) {
-        const daysLeft = Math.max(0, settings.storageGrace.graceDays - debtDays);
+      });
+
+      // With termination switched off, the end of the grace period changes
+      // nothing — so there is nothing to give notice OF either.
+      const ending = action === 'final_notice' || action === 'terminate';
+      if (ending && !settings.storageGrace.terminateAtEnd) continue;
+
+      if (action === 'terminate') {
+        await deploymentService.transition(deployment, 'terminated', {
+          note: 'Automatically terminated — unpaid storage exceeded the grace period. '
+            + 'The outstanding balance is not affected and remains owed.',
+          at: now,
+        });
+        await notifyCustomer({
+          userId: deployment.userId,
+          type: 'deployment_suspended',
+          contentKey: 'storage.terminated',
+          title: 'Deployment terminated — unpaid storage',
+          message: `"${deployment.deploymentName}" was terminated because its storage went unpaid `
+            + `for more than ${settings.storageGrace.graceDays} days. Any outstanding balance is still owed.`,
+          metadata: {
+            deploymentName: deployment.deploymentName,
+            graceDays: settings.storageGrace.graceDays,
+          },
+          priority: 'urgent',
+        });
+        terminated += 1;
+        continue;
+      }
+
+      if (action === 'warn' || action === 'final_notice') {
+        let deadline;
+        if (action === 'final_notice') deadline = 'Final notice: it will be terminated in about 24 hours.';
+        else if (daysLeft > 0) deadline = `${daysLeft} day(s) left before it is terminated.`;
+        else deadline = 'It will be terminated within the next day.';
+
         // Heading only — the body is the operator's `storageDebtMessage` from
         // the Admin Center. See notificationCopy.js's header.
         await notifyCustomer({
@@ -228,9 +240,11 @@ const runStorageGrace = async (settings, now) => {
           message: `${billingCopy(settings, 'storageDebtMessage', {
             deploymentName: deployment.deploymentName,
             storageGb: deployment.tier?.storageGb || 0,
-          })} ${daysLeft > 0 ? `${daysLeft} day(s) left before it is terminated.` : 'It will be terminated today.'}`,
-          priority: 'high',
+          })} ${deadline}`,
+          priority: action === 'final_notice' ? 'urgent' : 'high',
         });
+        // This stamp is what the termination waits on, so it is written as the
+        // moment the customer was actually told.
         deployment.storageGraceWarnedAt = now;
         await deployment.save();
         warned += 1;

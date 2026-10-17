@@ -26,10 +26,18 @@ export const FeatureProvider = ({ children }) => {
         const token = localStorage.getItem('admin_token');
         if (!token) { setLoaded(true); return; }
 
-        const { data } = await axiosInstance.get('/api/v1/admin/settings');
-        if (data.success && data.settings) {
-          const f = data.settings.features || {};
-          setFeatures((prev) => ({ ...prev, ...f }));
+        /*
+         * The narrow endpoint, not the whole settings document.
+         *
+         * This used to fetch `/admin/settings`, which needs `settings.view` —
+         * so a moderator or viewer, who has no business reading the platform's
+         * configuration, got a 403 toast on every single page. All this
+         * provider ever wanted was the feature flags, and those are readable
+         * by any admin because the navigation already reveals them.
+         */
+        const { data } = await axiosInstance.get('/api/v1/admin/settings/features');
+        if (data.success) {
+          setFeatures((prev) => ({ ...prev, ...(data.features || {}) }));
         }
       } catch {
         // Use defaults silently on error — axiosInstance's own interceptor

@@ -132,6 +132,45 @@ export const DetailSkeleton = () => {
   );
 };
 
-const Skeletons = { StatCardsSkeleton, CardGridSkeleton, TableRowsSkeleton, DetailSkeleton };
+/**
+ * Stands in for a chart while its data loads.
+ *
+ * Until now charts used antd's `<Card loading>` spinner while the KPI row
+ * above them used a shaped skeleton, so the page arrived in two different
+ * visual languages at two different moments. This draws the shape of a chart —
+ * a plot area with a baseline of bars — so the swap to real data is a fill,
+ * not a jump.
+ *
+ * `height` should match the chart it replaces, or the page shifts when the
+ * real one mounts.
+ */
+export const ChartSkeleton = ({ height = 280, bars = 12 }) => (
+  <div style={{ padding: '4px 2px' }}>
+    <div
+      style={{
+        height,
+        display: 'flex',
+        alignItems: 'flex-end',
+        gap: 6,
+      }}
+    >
+      {Array.from({ length: bars }).map((_, i) => (
+        <Block
+          key={i}
+          w="100%"
+          /* Deterministic, not random: a skeleton that reshuffles on every
+             re-render reads as flicker rather than as loading. */
+          h={Math.round(height * (0.35 + ((i * 37) % 55) / 100))}
+          r={4}
+        />
+      ))}
+    </div>
+    <Block w="100%" h={1} r={0} style={{ marginTop: 8, opacity: 0.6 }} />
+  </div>
+);
+
+const Skeletons = {
+  StatCardsSkeleton, CardGridSkeleton, TableRowsSkeleton, DetailSkeleton, ChartSkeleton,
+};
 
 export default Skeletons;

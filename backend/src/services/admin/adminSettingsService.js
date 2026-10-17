@@ -26,7 +26,8 @@ const SECTION_KEYS = [
   'themeSettings', 'emailSettings', 'emailTemplates', 'customerSettings', 'securitySettings',
   'analyticsSettings', 'notificationSettings', 'stripeSettings', 'lemonSqueezySettings',
   'polarSettings',
-  'maintenanceMode', 'seoSettings', 'billingSettings', 'deploymentSettings', 'features',
+  'maintenanceMode', 'seoSettings', 'billingSettings', 'deploymentSettings', 'gcpSettings',
+  'awsSettings', 'cloudRoutingSettings', 'cloudPricingSettings', 'features',
   'googleSSOSettings',
 ];
 const SCALAR_KEYS = ['siteName', 'siteDescription', 'supportEmail', 'contactEmail', 'activePaymentGateway'];
@@ -34,10 +35,33 @@ const SCALAR_KEYS = ['siteName', 'siteDescription', 'supportEmail', 'contactEmai
 /** Every default a brand-new settings row starts with. */
 const defaultsSnapshot = () => JSON.parse(JSON.stringify(DEFAULTS));
 
+const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * `override` wins field-for-field; anything it doesn't have falls back to
+ * `base`, recursively for nested objects. This is what actually makes a
+ * setting added to `adminSettingsDefaults.js` after the platform's one
+ * settings row already existed take effect without a migration — a section
+ * simply returned as `row[key]` would keep reading as `undefined` for that
+ * one key forever, since nothing ever writes it into the stored row unless
+ * an admin happens to save that section from the UI.
+ */
+const deepMerge = (base, override) => {
+  if (!isPlainObject(override)) return base;
+  const out = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    out[key] = isPlainObject(value) && isPlainObject(base?.[key])
+      ? deepMerge(base[key], value)
+      : value;
+  }
+  return out;
+};
+
 const toSettingsDoc = (row) => {
   const doc = {};
-  for (const key of SCALAR_KEYS) doc[key] = row[key];
-  for (const key of SECTION_KEYS) doc[key] = row[key] ?? {};
+  for (const key of SCALAR_KEYS) doc[key] = row[key] ?? DEFAULTS[key];
+  for (const key of SECTION_KEYS) doc[key] = deepMerge(DEFAULTS[key] || {}, row[key]);
   doc.createdAt = row.createdAt;
   doc.updatedAt = row.updatedAt;
   return doc;

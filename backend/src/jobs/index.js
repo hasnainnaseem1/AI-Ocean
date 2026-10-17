@@ -10,6 +10,9 @@ const lowBalanceWarning = require('./lowBalanceWarning');
 const debtCollection = require('./debtCollection');
 const notificationCleanup = require('./notificationCleanup');
 const teamSeatFee = require('./teamSeatFee');
+const analyticsRollup = require('./analyticsRollup');
+const gcpReconciler = require('./gcpReconciler');
+const awsReconciler = require('./awsReconciler');
 
 /* ─── Built-in system jobs ─── */
 const systemJobs = {
@@ -61,8 +64,26 @@ const systemJobs = {
     description: 'Attempts to charge saved cards for outstanding balances, warns and eventually '
       + 'terminates deployments whose unpaid storage has run past its grace period, pauses '
       + 'pay-as-you-go deployments for accounts over the debt limit, and warns about expiring cards.',
-    schedule: '0 3 * * *',
-    scheduleLabel: 'Daily at 3:00 AM',
+    /**
+     * Hourly, not once a night.
+     *
+     * At 03:00 daily, a server that was down at 03:00 skipped the whole day —
+     * and nothing ever made it up. On one account the job ran on 2 nights out
+     * of 28: four scheduled card attempts produced none, eleven grace warnings
+     * were never sent, and three deployments were terminated two days late.
+     * A deploy or restart at the wrong minute does the same in production.
+     *
+     * Running hourly does not mean acting hourly. Every decision is "is it due
+     * and not yet done" (services/billing/collectionSchedule.js): one card
+     * attempt per dunning slot, one grace reminder per day, card-expiry and
+     * stale-provisioning notices latched. So the only effect of the extra runs
+     * is that a missed hour is made up within the next one.
+     *
+     * At :45 so it never starts alongside billing (every ten minutes, from :00)
+     * or the low-balance check (:30).
+     */
+    schedule: '45 * * * *',
+    scheduleLabel: 'Every hour',
     system: true,
     enabled: true,
     lastRun: null,
@@ -74,7 +95,7 @@ const systemJobs = {
   teamSeatFee: {
     name: 'Team Seat Fees',
     /*
-     * Daily, an hour after debt collection, and deliberately not hourly: a
+     * Daily, and deliberately not hourly: a
      * seat fee is a share of a calendar day, so a day is the smallest unit it
      * can be charged in. Each day is claimed once on a unique index, so a
      * restart or a manual run in the same day charges nothing twice.
@@ -83,6 +104,89 @@ const systemJobs = {
       + 'seats the platform gives away. Whatever the wallet cannot cover becomes debt.',
     schedule: '0 4 * * *',
     scheduleLabel: 'Daily at 4:00 AM',
+    system: true,
+    enabled: true,
+    lastRun: null,
+    lastStatus: null,
+    lastError: null,
+    runCount: 0,
+    task: null,
+  },
+  analyticsRollup: {
+    name: 'Analytics Rollup',
+    /*
+     * After the seat fee, so the day's money is already written before
+     * anything snapshots it. Daily rather than hourly because what it records
+     * — a day's capacity — has no smaller unit, and because the pruning half
+     * only needs to run often enough to honour a retention measured in days.
+     *
+     * The heartbeat half is the one that matters: a tier's stock is
+     * overwritten in place, so a night missed here is a day of capacity
+     * history that cannot be reconstructed afterwards.
+     */
+    description: 'Snapshots each machine type\'s stock for the day, and prunes analytics history '
+      + 'past its retention window. Capacity history cannot be rebuilt later, so a missed run '
+      + 'loses that day permanently.',
+    schedule: '15 4 * * *',
+    scheduleLabel: 'Daily at 4:15 AM',
+    system: true,
+    enabled: true,
+    lastRun: null,
+    lastStatus: null,
+    lastError: null,
+    runCount: 0,
+    task: null,
+  },
+  gcpReconciler: {
+    name: 'Cloud Machine Reconciler',
+    description: 'Finds out whether machines asked for on Google Cloud actually came up, starts the '
+      + 'billing clock the moment one does, retries what failed transiently, and reports machines '
+      + 'that exist with no deployment behind them',
+    /**
+     * Every minute, which is far more often than anything else here.
+     *
+     * The interval is not a throughput question — a build takes 30 to 90
+     * seconds, and this only polls operations that are open. It is a *money*
+     * question in two directions. A machine that came up is already costing the
+     * platform, and the compute clock cannot start until this job notices; the
+     * charge is back-dated to GCP's own timestamp so nothing is lost, but a
+     * customer whose wallet is empty keeps running until a billing pass sees a
+     * clock that exists. And a build that failed leaves a customer watching a
+     * spinner.
+     *
+     * Every pass is "due and not yet done", so running often costs one indexed
+     * query when there is nothing to do.
+     */
+    schedule: '* * * * *',
+    scheduleLabel: 'Every minute',
+    system: true,
+    enabled: true,
+    lastRun: null,
+    lastStatus: null,
+    lastError: null,
+    runCount: 0,
+    task: null,
+  },
+  awsOrphanSweep: {
+    name: 'AWS Orphan Sweep',
+    description: 'Finds machines on AWS that this platform created and can no longer account for — '
+      + 'they bill by the hour with nobody being charged for them',
+    /**
+     * Every fifteen minutes, not every minute like the Google reconciler.
+     *
+     * That job runs every minute because it also starts the billing clock, and
+     * every minute of delay there is money. This one only *records* — it polls
+     * no operations and starts no clock, so the cost of finding an orphan five
+     * minutes later is five minutes of a bill that is already running either
+     * way. What it does cost is API calls: the sweep asks every configured
+     * region, so a minute-by-minute schedule would be one call per region per
+     * minute, forever, to answer a question whose answer almost never changes.
+     *
+     * When AWS status polling and the billing clock are written, they belong on
+     * their own minute-by-minute schedule, and this stays where it is.
+     */
+    schedule: '*/15 * * * *',
+    scheduleLabel: 'Every 15 minutes',
     system: true,
     enabled: true,
     lastRun: null,
@@ -114,6 +218,9 @@ const systemRunners = {
   debtCollection: debtCollection.run,
   notificationCleanup: notificationCleanup.run,
   teamSeatFee: teamSeatFee.run,
+  analyticsRollup: analyticsRollup.run,
+  gcpReconciler: gcpReconciler.run,
+  awsOrphanSweep: awsReconciler.runOnce,
 };
 
 /* ─── Custom jobs (loaded from DB at init, keyed by DB _id) ─── */
@@ -344,11 +451,14 @@ const initializeJobs = async () => {
     console.error('[CRON] Error loading custom jobs:', err.message);
   }
 
+  // Printed from the job table itself. This used to be a hand-written list,
+  // and it went on announcing "Debt collection — daily at 3 AM" and "billing
+  // every hour" after both had changed — the one place an operator reads to
+  // check a schedule was the one place guaranteed to be out of date.
   console.log('✅ Scheduled jobs initialized:');
-  console.log('   • Hourly deployment billing — every hour');
-  console.log('   • Low balance warnings — every hour');
-  console.log('   • Debt collection — daily at 3 AM');
-  console.log('   • Notification cleanup — daily at 4 AM');
+  Object.values(systemJobs).forEach((job) => {
+    console.log(`   • ${job.name} — ${job.scheduleLabel}`);
+  });
 };
 
 /* ─── API methods ─── */

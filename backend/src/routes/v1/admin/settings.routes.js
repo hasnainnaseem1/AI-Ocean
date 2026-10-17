@@ -10,6 +10,37 @@ const emailService = require('../../../services/email/emailService');
 const languageSettingsService = require('../../../services/i18n/languageSettingsService');
 const teamService = require('../../../services/team/teamService');
 
+/**
+ * @route   GET /api/v1/admin/settings/features
+ * @desc    Just the feature flags. Readable by any signed-in admin.
+ *
+ * ── Why this is separate from GET / ──
+ *
+ * The admin centre's layout needs to know which features are switched on in
+ * order to render its navigation, and it needs that on EVERY page. It was
+ * asking for the whole settings document, which requires `settings.view` —
+ * so a moderator or viewer, who legitimately has no business reading the
+ * platform's configuration, got a 403 toast on every screen they opened.
+ *
+ * The obvious fix — granting them `settings.view` — would also hand them the
+ * Settings and Integrations pages, and Integrations shows payment-gateway
+ * credentials. So the narrow need gets a narrow endpoint: a map of booleans
+ * saying which parts of the product exist, which is already evident from the
+ * navigation itself and reveals nothing.
+ *
+ * Declared before `/:section`-shaped routes for the usual reason.
+ */
+router.get('/features', async (req, res) => {
+  try {
+    const settings = await adminSettingsService.getSettings();
+    res.json({ success: true, features: settings?.features || {} });
+  } catch (error) {
+    // The layout falls back to its own defaults, so this must not be fatal.
+    console.error('Feature flags read failed:', error.message);
+    res.json({ success: true, features: {} });
+  }
+});
+
 // @route   GET /api/admin/settings
 // @desc    Get all admin settings
 // @access  Private (Admin with settings.view permission)
@@ -38,6 +69,38 @@ router.get('/', checkPermission('settings.view'), async (req, res) => {
       if (sanitizedSettings.googleSSOSettings) {
         delete sanitizedSettings.googleSSOSettings.clientSecret;
       }
+    }
+
+    /*
+     * The GCP service-account key is stripped for EVERYONE, super admin
+     * included — unlike every secret above it.
+     *
+     * The others are returned to a super admin so the Integrations form can
+     * show them. This one is never shown, because it is never needed: the form
+     * only ever accepts a new key, and `serviceAccountEmail` already tells an
+     * operator which key is loaded. A credential that can create and destroy
+     * machines has no reason to travel back out of the server at all.
+     *
+     * Routed through the controller's own `safeView` rather than deleting the
+     * one field here, so this read and the PUT response are the same shape by
+     * construction. Deleting a field by name is also how the next secret added
+     * to this section quietly starts being returned — `safeView` is an
+     * allowlist, so a new field is hidden until someone deliberately adds it.
+     */
+    if (sanitizedSettings.gcpSettings) {
+      const { safeView } = require('../../../controllers/admin/gcpSettingsController');
+      sanitizedSettings.gcpSettings = safeView(sanitizedSettings.gcpSettings);
+    }
+
+    /*
+     * The AWS secret key is stripped for EVERYONE, super admin included —
+     * same rule, same reason as the GCP key above. `safeView` is an allowlist,
+     * so a field added to this section later is hidden until somebody
+     * deliberately exposes it.
+     */
+    if (sanitizedSettings.awsSettings) {
+      const { safeView } = require('../../../controllers/admin/awsSettingsController');
+      sanitizedSettings.awsSettings = safeView(sanitizedSettings.awsSettings);
     }
 
     /*
@@ -381,7 +444,8 @@ router.put('/notification', checkPermission('settings.edit'), async (req, res) =
       enableEmailNotifications,
       enablePushNotifications,
       notifyAdminOnNewcustomer,
-      notifyAdminOnAutoSuspend
+      notifyAdminOnAutoSuspend,
+      notifyAdminOnNewTicket
     } = req.body;
     const clientIP = getClientIP(req);
 
@@ -398,6 +462,9 @@ router.put('/notification', checkPermission('settings.edit'), async (req, res) =
     }
     if (notifyAdminOnAutoSuspend !== undefined) {
       settings.notificationSettings.notifyAdminOnAutoSuspend = notifyAdminOnAutoSuspend;
+    }
+    if (notifyAdminOnNewTicket !== undefined) {
+      settings.notificationSettings.notifyAdminOnNewTicket = notifyAdminOnNewTicket;
     }
 
     settings.lastUpdatedBy = req.userId;
@@ -496,6 +563,91 @@ router.put('/maintenance', checkPermission('settings.edit'), async (req, res) =>
 // @route   PUT /api/admin/settings/features
 // @desc    Toggle feature flags
 // @access  Private (Super Admin or Admin with settings.edit permission)
+/**
+ * PUT /api/v1/admin/settings/cloud-pricing
+ *
+ * What the platform adds on top of a cloud provider's charge: overhead, tax and
+ * the margin it needs. These four numbers decide the price FLOOR of every tier,
+ * so a typo here quietly changes what the platform considers profitable — which
+ * is why each one is clamped to a sane range rather than stored as sent.
+ *
+ * `settings.edit` rather than super-admin-only: this is a pricing policy, the
+ * same kind of thing as the billing settings beside it. Nothing here can spend
+ * money or reach a cloud provider.
+ */
+router.put('/cloud-pricing', checkPermission('settings.edit'), async (req, res) => {
+  try {
+    const settings = await adminSettingsService.getSettings();
+    if (!settings.cloudPricingSettings) settings.cloudPricingSettings = {};
+    const cp = settings.cloudPricingSettings;
+
+    const {
+      overheadPercent, overheadPerHour, taxPercent, targetMarginPercent, providers,
+    } = req.body;
+
+    /*
+     * Clamped, not trusted. A negative overhead would be a discount the
+     * platform does not get, and an absurd margin would make the guard refuse
+     * every machine — both are typos, and both are silent.
+     */
+    const clamp = (v, lo, hi, fallback) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.min(hi, Math.max(lo, n));
+    };
+
+    if (overheadPercent !== undefined) cp.overheadPercent = clamp(overheadPercent, 0, 500, cp.overheadPercent || 0);
+    if (overheadPerHour !== undefined) cp.overheadPerHour = clamp(overheadPerHour, 0, 1000, cp.overheadPerHour || 0);
+    if (taxPercent !== undefined) cp.taxPercent = clamp(taxPercent, 0, 100, cp.taxPercent || 0);
+    if (targetMarginPercent !== undefined) {
+      cp.targetMarginPercent = clamp(targetMarginPercent, 0, 1000, cp.targetMarginPercent || 0);
+    }
+    if (providers && typeof providers === 'object') {
+      // Both default to on and are only turned off by an explicit `false`.
+      // AWS used to be coerced to off here because its pricing did not exist;
+      // it does now, and a cloud whose prices are never read would quietly
+      // sell machines at whatever stale figure the recorded table holds.
+      cp.providers = {
+        gcp: providers.gcp !== false,
+        aws: providers.aws !== false,
+      };
+    }
+
+    settings.lastUpdatedBy = req.userId;
+    settings.markModified('cloudPricingSettings');
+    await settings.save();
+
+    // Prices are cached per provider; a policy change does not invalidate them,
+    // but a provider being switched off should stop it being asked.
+    try { require('../../../services/cloud/cloudPricing').clearCache(); } catch { /* optional */ }
+
+    await activityLogService.logActivity({
+      userId: req.userId,
+      userName: req.user.name,
+      userEmail: req.user.email,
+      userRole: req.user.role,
+      action: 'settings_updated',
+      actionType: 'update',
+      targetModel: 'Settings',
+      description: 'Cloud cost and margin policy updated',
+      metadata: {
+        overheadPercent: cp.overheadPercent,
+        overheadPerHour: cp.overheadPerHour,
+        taxPercent: cp.taxPercent,
+        targetMarginPercent: cp.targetMarginPercent,
+      },
+      ipAddress: getClientIP(req),
+      userAgent: req.get('user-agent'),
+      status: 'success',
+    }).catch(() => {});
+
+    res.json({ success: true, message: 'Cloud cost settings saved', cloudPricingSettings: cp });
+  } catch (error) {
+    console.error('Update cloud pricing settings error:', error);
+    res.status(500).json({ success: false, message: 'Error updating cloud cost settings' });
+  }
+});
+
 router.put('/features', checkPermission('settings.edit'), async (req, res) => {
   try {
     const {
@@ -1281,6 +1433,169 @@ router.put('/lemonsqueezy', checkPermission('settings.edit'), lsController.updat
 // @access  Private (Super Admin only)
 const polarController = require('../../../controllers/admin/polarSettingsController');
 router.put('/polar', checkPermission('settings.edit'), polarController.updatePolar);
+
+// @route   PUT  /api/v1/admin/settings/gcp
+// @route   POST /api/v1/admin/settings/gcp/test
+// @desc    Google Cloud provisioning settings, and a connection check that
+//          creates nothing
+// @access  Private (Super Admin only — the controller enforces it, the
+//          permission here only gets them as far as the door)
+const gcpController = require('../../../controllers/admin/gcpSettingsController');
+router.put('/gcp', checkPermission('settings.edit'), gcpController.updateGcp);
+router.post('/gcp/test', checkPermission('settings.edit'), gcpController.testGcp);
+
+// @route   PUT  /api/v1/admin/settings/aws
+// @route   POST /api/v1/admin/settings/aws/test
+const awsController = require('../../../controllers/admin/awsSettingsController');
+router.put('/aws', checkPermission('settings.edit'), awsController.updateAws);
+router.post('/aws/test', checkPermission('settings.edit'), awsController.testAws);
+
+/**
+ * GET /api/v1/admin/settings/cloud-regions
+ *
+ * Where this platform can sell, and where it can actually build.
+ *
+ * Two different answers, and the difference is the point:
+ *
+ *  - `common` is every region **both** clouds have a mapping for. This is what
+ *    a tier may offer. A region only one cloud can serve breaks every tier
+ *    using it the day that tier's model is routed to the other cloud — so the
+ *    catalogue never offers one.
+ *  - `ready` is the subset where the infrastructure is genuinely built and the
+ *    cloud is switched on. A region can be sellable and not yet buildable;
+ *    that is a normal intermediate state, and the admin screen says so rather
+ *    than pretending the region does not exist.
+ *
+ * Derived, never configured — it is the intersection of the two region maps,
+ * so adding a region to one cloud and not the other cannot quietly produce a
+ * tier nobody can launch.
+ */
+router.get('/cloud-regions', checkPermission('settings.view'), async (req, res) => {
+  try {
+    const cloudRegions = require('../../../services/cloud/cloudRegions');
+    const awsShape = require('../../../services/aws/awsSettingsShape');
+    const settings = await adminSettingsService.getSettings();
+
+    const gcp = settings?.gcpSettings || {};
+    const aws = settings?.awsSettings || {};
+    const awsReady = awsShape.configuredRegions(aws);
+
+    const common = cloudRegions.commonRegions();
+
+    const detail = common.map((region) => {
+      const onGcp = cloudRegions.resolveOn('gcp', region);
+      const onAws = cloudRegions.resolveOn('aws', region);
+
+      // "Built" means the cloud is on AND that region's infrastructure exists.
+      // GCP's network is global, so one connected project covers every region;
+      // AWS needs each region built separately.
+      const gcpBuilt = !!gcp.enabled && !!gcp.projectId;
+      const awsBuilt = !!aws.enabled && awsReady.includes(onAws.awsRegion);
+
+      return {
+        region,
+        gcpRegion: onGcp.gcpRegion || null,
+        awsRegion: onAws.awsRegion || null,
+        gcpBuilt,
+        awsBuilt,
+        /*
+         * Buildable on every cloud that is switched on. A tier in a region
+         * that is not ready can still be saved — the catalogue and the
+         * infrastructure move at different speeds — but the form says so.
+         */
+        ready: (!gcp.enabled || gcpBuilt) && (!aws.enabled || awsBuilt)
+          && (!!gcp.enabled || !!aws.enabled),
+      };
+    });
+
+    res.json({
+      success: true,
+      common,
+      regions: detail,
+      ready: detail.filter((d) => d.ready).map((d) => d.region),
+      // Regions one cloud has and the other does not, with the reason. Empty
+      // in a healthy configuration; a test asserts that.
+      asymmetric: cloudRegions.assertSymmetric().asymmetric,
+    });
+  } catch (error) {
+    console.error('Cloud regions error:', error);
+    res.status(500).json({ success: false, message: 'Error reading cloud regions' });
+  }
+});
+
+/**
+ * PUT /api/v1/admin/settings/cloud-routing
+ *
+ * The tie-breaker: when more than one cloud is switched on and a model has no
+ * assignment of its own, which cloud wins.
+ *
+ * There is deliberately no "active clouds" list here — each cloud's own
+ * `enabled` switch is the one an operator sees on that cloud's page, and a
+ * second list would be a copy to fall out of step with it. With a single cloud
+ * on, this setting is not consulted at all.
+ */
+router.put('/cloud-routing', checkPermission('settings.edit'), async (req, res) => {
+  try {
+    const cloudRouter = require('../../../services/cloud/cloudRouter');
+    const { defaultCloud } = req.body || {};
+
+    const wanted = String(defaultCloud || '').trim();
+    if (wanted && !cloudRouter.isCloud(wanted)) {
+      return res.status(400).json({
+        success: false,
+        message: `"${wanted}" is not a cloud this platform can build on. `
+          + `Use ${cloudRouter.CLOUDS.join(' or ')}, or clear it.`,
+      });
+    }
+
+    const settings = await adminSettingsService.getSettings();
+    if (!settings.cloudRoutingSettings) settings.cloudRoutingSettings = {};
+    const before = settings.cloudRoutingSettings.defaultCloud || '';
+    settings.cloudRoutingSettings.defaultCloud = wanted;
+
+    settings.lastUpdatedBy = req.userId;
+    settings.markModified('cloudRoutingSettings');
+    await settings.save();
+
+    /*
+     * What this actually changes, said plainly. Only models with no assignment
+     * of their own move, and only their FUTURE deployments — everything
+     * already running keeps the cloud frozen onto it.
+     */
+    const prisma = require('../../../lib/prismaClient');
+    const unassigned = await prisma.aIModel
+      .count({ where: { cloudProvider: null, isActive: true } })
+      .catch(() => null);
+
+    await activityLogService.logActivity({
+      userId: req.userId,
+      userName: req.user.name,
+      userEmail: req.user.email,
+      userRole: req.user.role,
+      action: 'settings_updated',
+      actionType: 'update',
+      targetModel: 'Settings',
+      description: `Default cloud: ${before || 'none'} -> ${wanted || 'none'}`,
+      metadata: { before, after: wanted, unassignedModels: unassigned },
+      ipAddress: getClientIP(req),
+      userAgent: req.get('user-agent'),
+      status: 'success',
+    }).catch(() => {});
+
+    res.json({
+      success: true,
+      message: wanted
+        ? `Models with no cloud of their own will now use ${wanted.toUpperCase()}.`
+        : 'No default cloud is set.',
+      cloudRoutingSettings: settings.cloudRoutingSettings,
+      // So the admin can see the blast radius before wondering about it.
+      affectedModels: unassigned,
+    });
+  } catch (error) {
+    console.error('Update cloud routing error:', error);
+    res.status(500).json({ success: false, message: 'Error updating cloud routing' });
+  }
+});
 
 // @route   PUT /api/v1/admin/settings/payment-gateway
 // @desc    Set the active payment gateway (stripe, lemonsqueezy, or polar)

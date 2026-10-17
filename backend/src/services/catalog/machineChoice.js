@@ -96,6 +96,11 @@ const resolveCatalogue = async ({ model, tierId, settings, requireBookable }) =>
         ramGb: tier.ramGb,
         storageGb: tier.storageGb,
         storageType: tier.storageType,
+        // Carried through so the deployment's snapshot is complete. It used to
+        // be dropped here, which meant a catalogue deployment had no record of
+        // the bandwidth it was sold — only custom builds kept it, inside their
+        // parts list.
+        networkGbps: tier.networkGbps,
       },
       listRate,
       listStoppedRate: catalogService.stoppedRateForTier(model, tier) || 0,
@@ -152,6 +157,7 @@ const resolveCustom = async ({ model, build, settings }) => {
         ramGb: priced.specs.ramGb,
         storageGb: priced.specs.storageGb,
         storageType: priced.specs.storageType,
+        networkGbps: priced.specs.networkGbps,
       },
       listRate: priced.pricePerHour,
       listStoppedRate: priced.stoppedPricePerHour,

@@ -57,6 +57,14 @@ module.exports = {
     title: 'आपको संगठन से हटाया गया',
     message: 'अब {teamName} तक आपकी पहुँच नहीं है।',
   },
+  'support.ticketReplied': {
+    title: 'सपोर्ट ने आपके टिकट का जवाब दिया',
+    message: 'सपोर्ट ने {ticketNumber} — "{subject}" का जवाब दिया।',
+  },
+  'support.ticketResolved': {
+    title: 'आपका टिकट हल के रूप में चिह्नित किया गया',
+    message: '{ticketNumber} — "{subject}" हल के रूप में चिह्नित किया गया। अगर यह हल नहीं हुआ, तो बस जवाब दें, यह फिर से खुल जाएगा।',
+  },
   'deployment.approved': {
     title: 'डिप्लॉयमेंट स्वीकृत',
     message: 'आपकी {modelName} डिप्लॉयमेंट "{deploymentName}" स्वीकृत हो गई है और तैयार की जा रही है।',

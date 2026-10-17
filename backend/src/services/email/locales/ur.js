@@ -224,11 +224,11 @@ module.exports = {
     subject: '{{title}} · {{siteName}}',
     body: `
       <h2 style="color: {{primaryColor}}; margin: 0 0 16px;">{{title}}</h2>
-      <p>السلام علیکم {{name}}،</p>
+      <p>السلام علیکم {{userName}}،</p>
       <p>{{message}}</p>
       {{actionBlock}}
       <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">
-        یہ پیغام آپ کو {{siteName}} پر ایک تنظیم کی رکنیت کی وجہ سے موصول ہوا ہے۔
+        یہ پیغام آپ کو {{siteName}} پر آپ کے اکاؤنٹ کی سرگرمی کی وجہ سے موصول ہوا ہے۔
       </p>
     `,
   },

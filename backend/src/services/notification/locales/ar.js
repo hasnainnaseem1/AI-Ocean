@@ -62,6 +62,14 @@ module.exports = {
     title: 'أُزلت من فريق',
     message: 'لم يعد لديك وصول إلى {teamName}.',
   },
+  'support.ticketReplied': {
+    title: 'رد الدعم على تذكرتك',
+    message: 'رد الدعم على {ticketNumber} — "{subject}".',
+  },
+  'support.ticketResolved': {
+    title: 'تم وضع علامة "تم الحل" على تذكرتك',
+    message: 'تم وضع علامة "تم الحل" على {ticketNumber} — "{subject}". إذا لم يُحل الأمر، فقط أرسل ردًا وستُفتح من جديد.',
+  },
   'deployment.approved': {
     title: 'تمت الموافقة على النشر',
     message: 'تمت الموافقة على نشر {modelName} الخاص بك "{deploymentName}" وجارٍ تجهيزه.',

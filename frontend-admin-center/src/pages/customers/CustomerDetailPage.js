@@ -22,6 +22,7 @@ import { StatRow, StatCard } from '../../components/StatRow';
 import { STATUS_META } from '../deployments/DeploymentsListPage';
 import customersApi from '../../api/customersApi';
 import PaygAccessCard from '../../components/customers/PaygAccessCard';
+import AutoDeployCard from '../../components/AutoDeployCard';
 import CustomerTeamsCard from '../../components/customers/CustomerTeamsCard';
 import walletsApi from '../../api/walletsApi';
 import { usePermission } from '../../hooks/usePermission';
@@ -71,6 +72,9 @@ const CustomerDetailPage = () => {
   const error = STATUS_COLORS.error[isDark ? 'dark' : 'light'];
   const [loading, setLoading] = useState(true);
   const [customer, setCustomer] = useState(null);
+  // The customer's personal account — what actually owns their deployments.
+  // Carries the account-level controls, so it is kept beside the customer.
+  const [account, setAccount] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [allActivity, setAllActivity] = useState([]);
   const [activity, setActivity] = useState([]);
@@ -128,6 +132,7 @@ const CustomerDetailPage = () => {
     try {
       const data = await customersApi.getCustomer(id);
       setCustomer(data.customer);
+      setAccount(data.account || null);
       setAnalytics(data.analytics);
       setAllActivity(data.recentActivity || []);
       setActivity(data.recentActivity || []);
@@ -417,6 +422,26 @@ const CustomerDetailPage = () => {
 
   const walletCurrency = analytics?.wallet?.currency || wallet?.wallet?.currency || 'USD';
 
+  /*
+   * Provisioning sits on the overview, not under billing.
+   *
+   * It is not a money setting — it decides whether a person looks at this
+   * customer's deployments before hardware exists. The admin who comes here to
+   * ask "should this customer be building machines on their own?" is looking at
+   * the overview, not at the wallet.
+   */
+  const autoDeployCard = (
+    <AutoDeployCard
+      account={account}
+      canManage={canManageBilling}
+      onChanged={(data) => {
+        if (data?.account) setAccount(data.account);
+        fetchDeployments();
+      }}
+      style={{ marginBottom: 16 }}
+    />
+  );
+
   // ── Overview tab ──────────────────────────────────────────────────────
   const overviewTab = (
     <>
@@ -442,6 +467,8 @@ const CustomerDetailPage = () => {
           value={formatDateTime(customer.createdAt).split(',')[0]}
         />
       </StatRow>
+
+      {autoDeployCard}
 
       <Card title={<Space><SafetyOutlined />Account Details</Space>} style={{ marginBottom: 16 }}>
         <Row gutter={[24, 24]}>

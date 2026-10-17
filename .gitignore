@@ -11,3 +11,27 @@ build/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# ── Terraform / Terragrunt ──
+# State can hold resource details and anything a provider echoed back, and the
+# real state lives in the GCS bucket — a local copy is either a stale lie or a
+# leak. The caches are machine-specific and large.
+.terraform/
+.terragrunt-cache/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+# Variable files may carry project ids, CIDRs and (by accident) secrets.
+# `*.auto.tfvars` and committed example files are the deliberate exceptions.
+*.tfvars
+!*.tfvars.example
+
+# ── Cloud credentials ──
+# A service-account key is the whole account. It belongs in the admin center
+# (encrypted) or in a secret manager, never in the repo.
+*-sa-key.json
+*-service-account.json
+gcp-key*.json
+application_default_credentials.json

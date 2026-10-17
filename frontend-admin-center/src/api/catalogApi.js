@@ -8,6 +8,18 @@ import { buildQueryParams } from '../utils/helpers';
  * onto each deployment at order time.
  */
 export const modelsApi = {
+  /**
+   * PATCH /api/v1/admin/models/:id/cloud
+   *
+   * Which cloud this model's deployments are built on. Empty means "use the
+   * platform default". Only affects deployments created from now on — anything
+   * already running keeps the cloud frozen onto it.
+   */
+  setCloud: (id, cloudProvider) =>
+    axiosInstance
+      .patch(`/api/v1/admin/models/${id}/cloud`, { cloudProvider: cloudProvider || '' })
+      .then((r) => r.data),
+
   /** GET /api/v1/admin/models */
   getModels: (params = {}) =>
     axiosInstance

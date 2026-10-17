@@ -16,7 +16,7 @@
  * bills correctly on the next pass rather than losing the hours.
  */
 const deploymentUsageService = require('../deployment/deploymentUsageService');
-const { BILLABLE_STATUSES, STORAGE_BILLABLE_STATUSES } = require('../deployment/deploymentConstants');
+const { isComputeBillable, isStorageBillable } = require('../deployment/deploymentConstants');
 const creditService = require('./creditService');
 const debtService = require('./debtService');
 const billingModeService = require('./billingModeService');
@@ -42,10 +42,17 @@ const roundMoney = (n) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 // Don't write a usage row for a sliver of time — it just clutters the ledger
 const MIN_BILLABLE_HOURS = 1 / 60; // one minute
 
-/** Is this deployment being charged for compute, for storage, or not at all? */
-const billingKind = (status) => {
-  if (BILLABLE_STATUSES.includes(status)) return 'compute';
-  if (STORAGE_BILLABLE_STATUSES.includes(status)) return 'storage';
+/**
+ * Is this deployment being charged for compute, for storage, or not at all?
+ *
+ * Takes the whole deployment rather than just its status: with automatic
+ * provisioning the compute meter follows the real machine, so a deployment can
+ * owe the compute rate while sitting in `provisioning`. See `isComputeBillable`
+ * in deploymentConstants.js for why.
+ */
+const billingKind = (deployment) => {
+  if (isComputeBillable(deployment)) return 'compute';
+  if (isStorageBillable(deployment)) return 'storage';
   return null;
 };
 
@@ -162,7 +169,7 @@ const billOutstanding = async (deployment, options = {}) => {
     unsettled: 0,
   };
 
-  const kind = billingKind(deployment.status);
+  const kind = billingKind(deployment);
   if (!kind) return idle;
 
   // The platform owner can turn idle-storage charging off entirely without
@@ -476,7 +483,7 @@ const settleTerminal = async (deployment, options = {}) => {
   const save = options.save !== false;
   const nothingOwed = { settled: true, amount: 0, hours: 0, rate: 0 };
 
-  const kind = billingKind(deployment.status);
+  const kind = billingKind(deployment);
   if (!kind) return nothingOwed;
 
   const periodStart = deployment.lastBilledAt || deployment.startedAt;

@@ -7,6 +7,17 @@ const seoRoutes = require('./seo.routes');
 const catalogRoutes = require('./catalog.routes');
 const { downloadInvoicePublic } = require('../../../controllers/customer/billingController');
 
+/*
+ * The traffic collector, FIRST.
+ *
+ * `router.use('/', marketingRoutes)` at the bottom of this file is a catch-all
+ * on the root path: anything mounted after it is unreachable. This is the one
+ * mount in the file whose position is a correctness requirement rather than a
+ * matter of taste, so it goes at the top where it cannot be reordered by
+ * accident.
+ */
+router.use('/track', require('./track.routes'));
+
 // Public routes — no authentication required
 router.use('/marketing', marketingRoutes);
 router.use('/blog', blogRoutes);

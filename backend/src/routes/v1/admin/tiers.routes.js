@@ -104,6 +104,15 @@ router.post('/price-preview', checkPermission('models.view'), async (req, res) =
     res.json({
       success: true,
       ...quote,
+      /*
+       * The specs these parts add up to — 8 vCPU, 64 GB, one A100, and so on.
+       *
+       * Derived with the SAME function the save path uses, so the builder is
+       * describing the machine the tier will actually become. The cloud-cost
+       * panel on this form prices that machine, and pricing a different set of
+       * specs from the one being saved would be worse than showing nothing.
+       */
+      specs: tierPricing.rollupComponents(quote.lines).specs,
       freeComputeWarnings: tierPricing.computeFreeComputeWarnings({
         pricePerHour: quote.pricePerHour,
         stoppedPricePerHour: quote.stoppedPricePerHour,

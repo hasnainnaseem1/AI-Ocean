@@ -158,6 +158,77 @@ router.patch('/:id/toggle', checkPermission('models.edit'), async (req, res) => 
   }
 });
 
+/**
+ * @route   PATCH /api/v1/admin/models/:id/cloud
+ * @desc    Which cloud this model's deployments are built on
+ *
+ * Null (or an empty string) means "use the platform default", which is what
+ * every model starts as. This is the per-model assignment: Kimi K3 and Llama
+ * on AWS, DeepSeek on Google, say.
+ *
+ * ── It only decides where the NEXT deployment goes ──
+ *
+ * Changing this never moves a machine that already exists. The cloud is frozen
+ * onto each deployment at creation (`Deployment.cloudProvider`), and every
+ * later operation reads the frozen value — because re-deriving it would send a
+ * terminate order to the wrong provider and leave the real machine running
+ * with nothing watching it.
+ *
+ * The response says how many deployments are already on each cloud, so an
+ * admin changing an assignment can see what is NOT moving.
+ */
+router.patch('/:id/cloud', checkPermission('models.edit'), async (req, res) => {
+  try {
+    const cloudRouter = require('../../../services/cloud/cloudRouter');
+    const wanted = String(req.body?.cloudProvider || '').trim();
+
+    if (wanted && !cloudRouter.isCloud(wanted)) {
+      return res.status(400).json({
+        success: false,
+        message: `"${wanted}" is not a cloud this platform can build on. `
+          + `Use ${cloudRouter.CLOUDS.join(' or ')}, or clear it to use the default.`,
+      });
+    }
+
+    const existing = await prisma.aIModel.findUnique({ where: byPublicId(req.params.id) });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Model not found' });
+    }
+
+    const model = await prisma.aIModel.update({
+      where: { id: existing.id },
+      data: { cloudProvider: wanted || null, updatedById: req.user.id },
+    });
+
+    // What is already running, and therefore staying exactly where it is.
+    const grouped = await prisma.deployment.groupBy({
+      by: ['cloudProvider'],
+      where: { modelId: existing.id, status: { notIn: ['terminated', 'rejected', 'failed'] } },
+      _count: { _all: true },
+    }).catch(() => []);
+
+    const existingDeployments = Object.fromEntries(
+      grouped.map((r) => [r.cloudProvider || 'manual', r._count._all])
+    );
+
+    await logChange(req, 'model_updated', model,
+      `Cloud for AI model "${model.name}": ${existing.cloudProvider || 'default'} -> ${wanted || 'default'}`);
+
+    res.json({
+      success: true,
+      message: wanted
+        ? `New deployments of ${model.name} will be built on ${wanted.toUpperCase()}.`
+        : `${model.name} will use the default cloud.`,
+      model,
+      // Stated rather than left to be discovered later.
+      existingDeployments,
+    });
+  } catch (error) {
+    console.error('Set model cloud error:', error);
+    res.status(500).json({ success: false, message: 'Error setting the cloud for this model' });
+  }
+});
+
 // @route   PUT /api/v1/admin/models/reorder
 // @desc    Persist drag-and-drop ordering
 router.put('/order/bulk', checkPermission('models.edit'), async (req, res) => {

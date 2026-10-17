@@ -8,11 +8,24 @@ import { getBrand } from '../theme/colors';
  * keeps for the real charts on Analytics/Dashboard — see theme/chartTheme.js)
  * would be disproportionate to what it draws.
  *
- * Ported unchanged from the customer center. Deliberately does not fabricate
- * data: pass real values or omit the sparkline entirely. Renders nothing for
- * fewer than 2 points.
+ * Ported from the customer center. Deliberately does not fabricate data: pass
+ * real values or omit the sparkline entirely. Renders nothing for fewer than 2
+ * points.
+ *
+ * ── `fluid` ──
+ *
+ * A fixed 84px sparkline beside a stat value is fine on a wide screen and
+ * wrong on a narrow one: the value is text and cannot shrink, so on a 1280px
+ * display six KPI cards are ~130px wide and the sparkline simply sat on top of
+ * the number. With `fluid` the drawing keeps its proportions but is allowed to
+ * scale DOWN into whatever room the container leaves — `meet` rather than
+ * `none`, so the end-point dot stays a circle and the line weight is not
+ * stretched — pinned to the right edge, and vanishing entirely when there is
+ * no room rather than colliding with the figure it decorates.
  */
-const Sparkline = ({ values = [], width = 120, height = 36, color, filled = true }) => {
+const Sparkline = ({
+  values = [], width = 120, height = 36, color, filled = true, fluid = false,
+}) => {
   const { isDark } = useTheme();
   const gradientId = useId();
   const stroke = color || getBrand(isDark);
@@ -41,7 +54,13 @@ const Sparkline = ({ values = [], width = 120, height = 36, color, filled = true
   if (!path) return null;
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', overflow: 'visible' }}>
+    <svg
+      width={fluid ? '100%' : width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio={fluid ? 'xMaxYMid meet' : undefined}
+      style={{ display: 'block', overflow: 'visible' }}
+    >
       {filled && (
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">

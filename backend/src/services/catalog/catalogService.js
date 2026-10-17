@@ -1,6 +1,7 @@
 const { ComponentKind } = require('@prisma/client');
 const prisma = require('../../lib/prismaClient');
 const tierPricing = require('./tierPricing');
+const tierCapacityLog = require('../analytics/tierCapacityLog');
 const { byPublicId, byPublicIds, mapByPublicId, isPublicId } = require('../../utils/helpers/publicId');
 
 /**
@@ -545,13 +546,26 @@ const updateTier = async (tier, body, actorId) => {
     updatedById: actorId,
   };
 
+  const capacityChanged = scalarData.capacityTotal !== tier.capacityTotal
+    || scalarData.capacityAllocated !== tier.capacityAllocated
+    || scalarData.status !== tier.status;
+
   const updated = await prisma.$transaction(async (tx) => {
     await tx.tierComponent.deleteMany({ where: { tierId: tier.id } });
-    return tx.tier.update({
+    const row = await tx.tier.update({
       where: { id: tier.id },
       data: { ...scalarData, components: { create: componentCreateInputs(usingLines) } },
       include: TIER_INCLUDE,
     });
+    // An admin raising or lowering a ceiling is a stock event too — and
+    // usually the interesting one, since it is the only kind somebody chose.
+    if (capacityChanged) {
+      await tierCapacityLog.record(tx, row, {
+        reason: 'admin_edit',
+        activeDeployments: row.capacityAllocated,
+      });
+    }
+    return row;
   });
 
 
@@ -702,10 +716,24 @@ const adjustTierAllocation = async (legacyTierId, delta) => {
       status = remaining <= 0 ? 'out_of_stock' : remaining <= 2 ? 'limited' : 'available';
     }
 
-    await prisma.tier.update({
-      where: { id: tier.id },
-      data: { capacityAllocated, status },
-      include: TIER_INCLUDE,
+    /*
+     * The update and its history row go together or not at all.
+     *
+     * This value is overwritten in place, so the only record that the A100 sat
+     * at zero last Tuesday is the row written here. If the write succeeded and
+     * the log did not, every stock-out duration computed afterwards would be
+     * wrong — and wrong in a way nothing downstream can detect, because a
+     * capacity history has no symptom when it silently skips an event.
+     */
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.tier.update({
+        where: { id: tier.id },
+        data: { capacityAllocated, status },
+      });
+      await tierCapacityLog.record(tx, updated, {
+        reason: delta > 0 ? 'deployment_started' : 'deployment_ended',
+        activeDeployments: capacityAllocated,
+      });
     });
   } catch (err) {
     console.error('[catalogService] Failed to adjust tier allocation:', err.message);

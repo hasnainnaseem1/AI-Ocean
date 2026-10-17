@@ -485,3 +485,77 @@ h1.ant-typography, h2.ant-typography, h3.ant-typography, h4.ant-typography {
     box-shadow: none !important;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Analytics surfaces: cards that share a row share a height.
+
+   Every analytics tab is rows of two or three cards, and their contents are
+   different lengths by nature — a stock list against a line chart, a funnel
+   against a bar chart. antd's Row aligns its columns to the top, so the
+   shorter card stopped where its content did and left a ragged step of empty
+   ground beside the taller one. Across eight tabs of this, the page reads as
+   though the spacing is broken rather than as though the data is uneven.
+
+   Stretching the column and letting the card fill it costs nothing — a card
+   with less in it simply has more room at the bottom — and it is what makes a
+   row read as one band.
+
+   Scoped to `.analytics-surface` rather than applied to every `.ant-card` on
+   the platform: forms, detail pages and settings have their own deliberate
+   shapes, and equalising a two-field card against a long form would be worse
+   than the problem this fixes.
+
+   The Dashboard opts in too. It is the same thing — rows of cards whose
+   contents are different lengths by nature — and it showed the same step.
+   ───────────────────────────────────────────────────────────────────────── */
+.analytics-surface .ant-row {
+  align-items: stretch;
+}
+
+/*
+   The card is the flex column, and its body is the part that grows.
+
+   `height: 100%` on the body is the obvious-looking version and is wrong: the
+   body starts BELOW the card's title, so making it the full height of the card
+   pushes it past the bottom border by exactly the title's height — the content
+   then hangs outside the card. Letting the body flex into whatever is left
+   after the title is the only version that stays inside the box.
+*/
+.analytics-surface .ant-row > .ant-col > .ant-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.analytics-surface .ant-row > .ant-col > .ant-card > .ant-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   A KPI sparkline that has run out of room disappears rather than shrinking
+   to a smudge.
+
+   `Sparkline fluid` scales DOWN into whatever the figure beside it leaves, so
+   it can never collide with the number. But on a 1280px screen a long figure
+   such as $4,840.49 leaves ~14px, and a 14-pixel squiggle is worse than
+   nothing: it looks like a rendering fault and says nothing about the trend.
+   Below 40px there is no trend to read, so it is not drawn.
+
+   `container-type: inline-size` is safe on this element because its width
+   comes from `flex-basis`, not from its content — size containment does not
+   change what it is sized to.
+   ───────────────────────────────────────────────────────────────────────── */
+.stat-card-chart {
+  container-type: inline-size;
+}
+
+/* `!important` is required, not stylistic: Sparkline's <svg> carries an inline
+   `display: block`, and an inline declaration beats any stylesheet rule that
+   is not marked important. Without it this rule loads, matches, and does
+   nothing. */
+@container (max-width: 39px) {
+  .stat-card-chart > * {
+    display: none !important;
+  }
+}
