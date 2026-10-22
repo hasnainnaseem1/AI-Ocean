@@ -43,6 +43,8 @@
  * one API call that returns in about a second.
  */
 const capGuard = require('./capGuard');
+const deploymentHold = require('../deployment/deploymentHold');
+const regionDemand = require('../cloud/regionDemand');
 // No cloud driver is imported here any more: the driver comes from
 // `provisioningDriver.getDriver(deployment)`, which resolves it from the
 // deployment's own frozen cloud. Importing one would quietly reintroduce the
@@ -204,8 +206,36 @@ const provisionNow = async (deployment, opts) => {
       priority: 'high',
       metadata: { code: verdict.code, machineType: placement.plan.machineType },
     });
+
+    /*
+     * Tell the CUSTOMER too.
+     *
+     * Keeping the order rather than failing it is right — they did nothing
+     * wrong and the price is ours to fix — but "kept" used to be all that
+     * happened. They saw "Pending review" with no reason and no end to it,
+     * and the only way out was to give up. A correct decision delivered as
+     * silence reads as a broken product.
+     *
+     * The words they see are written in `deploymentHold`, and never include
+     * what a machine costs us or what margin we need.
+     */
+    const holdKind = deploymentHold.FROM_GUARD_CODE[verdict.code];
+    if (holdKind) {
+      await deploymentHold.place(deployment, { kind: holdKind, reason: verdict.reason })
+        .catch((err) => console.error('[AutoProvision] Could not record the hold:', err.message));
+    }
+
     return idle(verdict.code, verdict.reason);
   }
+
+  /*
+   * Past every refusal: whatever was holding this order is over, so the
+   * customer-facing notice comes down. Cleared here rather than by a sweep
+   * because the only proof a hold is finished is that the thing it blocked
+   * has gone through.
+   */
+  await deploymentHold.clear(deployment)
+    .catch((err) => console.error('[AutoProvision] Could not clear the hold:', err.message));
 
   /*
    * ── On the way to a machine ──
@@ -260,6 +290,77 @@ const provisionNow = async (deployment, opts) => {
       provisioned: false,
       code: result.detail?.code || 'PROVISION_FAILED',
       message: result.message,
+    };
+  }
+
+  /*
+   * ── The first order in a region nobody has used yet ──
+   *
+   * Not a failure and not really a retry: the network this machine needs does
+   * not exist in that region, and building it is the platform's own job. The
+   * order is held with something the customer can read, the region is marked
+   * as wanted, and the reconciler keeps trying — so the moment the ids land in
+   * settings the machine starts with no further intervention.
+   *
+   * The customer-facing wait and the admin's work item are deliberately two
+   * different texts. The customer is told a region is being set up; the admin
+   * is told which region, how many orders are waiting on it, and what to run.
+   */
+  if (!result.ok && result.detail?.needsRegion) {
+    /*
+     * The provider's own name for the region, from whichever driver answered
+     * — `awsRegion` from AWS, `gcpRegion` from Google. Falling back to the
+     * deployment's own region keeps this working for a driver that reports
+     * neither.
+     */
+    const awsRegion = result.detail.awsRegion
+      || result.detail.gcpRegion
+      || deployment.region
+      || '';
+
+    await deploymentHold.place(deployment, {
+      kind: deploymentHold.KINDS.REGION,
+      reason: result.message,
+    }).catch((err) => console.error('[AutoProvision] Could not hold for the region:', err.message));
+
+    const want = await regionDemand.want({
+      cloud,
+      region: awsRegion,
+      deploymentId: deployment.id,
+      missing: result.detail.missing || [],
+    }).catch((err) => {
+      console.error('[AutoProvision] Could not record the region demand:', err.message);
+      return null;
+    });
+
+    // Named from the cloud this deployment is actually frozen to. The text
+    // used to say AWS whatever answered, which sent an admin to the wrong
+    // screen and the wrong folder.
+    const cloudLabel = cloud === 'gcp' ? 'Google Cloud' : 'AWS';
+    const cloudTab = cloud === 'gcp' ? 'Google Cloud' : 'AWS';
+
+    await notifyAdmins(deployment, {
+      title: `${cloudLabel} is not built in ${awsRegion} yet`,
+      message:
+        `"${deployment.deploymentName}" is waiting for a network in ${awsRegion}`
+        + `${want?.waiting > 1 ? `, along with ${want.waiting - 1} other order(s)` : ''}. `
+        + `Build it from Admin → Cloud → ${cloudTab}, or apply infra/${cloud}/live/<env>. `
+        + 'The order starts on its own once the ids are saved — nothing is charged while it waits.',
+      priority: 'high',
+      metadata: {
+        code: 'REGION_NOT_CONFIGURED',
+        awsRegion,
+        missing: result.detail.missing || [],
+        waiting: want?.waiting || 1,
+      },
+    });
+
+    return {
+      attempted: true,
+      provisioned: false,
+      code: 'REGION_NOT_CONFIGURED',
+      message: result.message,
+      awaitingRegion: awsRegion,
     };
   }
 
@@ -369,7 +470,17 @@ const onDeploymentCreated = async (deployment, options = {}) => {
 
     // The cheap refusals, before any database work. A platform with the cloud
     // switched off must not pay for extra queries on every deployment.
-    const gate = capGuard.decide({ cloud, gcp: settings?.gcpSettings || {} });
+    /*
+     * That cloud's own settings, not Google's.
+     *
+     * This read `settings.gcpSettings` whatever cloud the deployment was
+     * routed to, so an AWS deployment was judged against Google's switches:
+     * with Google off — the normal state of an AWS-only platform — every AWS
+     * order was refused `GCP_DISABLED` and sent quietly to the queue. The
+     * argument is named `gcp` because the guard predates the second cloud;
+     * `capGuard.evaluate` already looks its settings up this way.
+     */
+    const gate = capGuard.decide({ cloud, gcp: settings?.[`${cloud}Settings`] || {} });
     if (!gate.ok && QUIET_CODES.includes(gate.code)) return idle(gate.code, route.reason || gate.reason);
 
     /*
@@ -454,7 +565,17 @@ const onAdminApproved = async (deployment, options = {}) => {
 
     const { settings, cloud, route } = await context(deployment, options);
 
-    const gate = capGuard.decide({ cloud, gcp: settings?.gcpSettings || {} });
+    /*
+     * That cloud's own settings, not Google's.
+     *
+     * This read `settings.gcpSettings` whatever cloud the deployment was
+     * routed to, so an AWS deployment was judged against Google's switches:
+     * with Google off — the normal state of an AWS-only platform — every AWS
+     * order was refused `GCP_DISABLED` and sent quietly to the queue. The
+     * argument is named `gcp` because the guard predates the second cloud;
+     * `capGuard.evaluate` already looks its settings up this way.
+     */
+    const gate = capGuard.decide({ cloud, gcp: settings?.[`${cloud}Settings`] || {} });
     if (!gate.ok && QUIET_CODES.includes(gate.code)) {
       // The cloud is switched off platform-wide. The approval still stands —
       // it just means a human fulfils it, exactly as before any of this.
@@ -488,6 +609,59 @@ const onAdminApproved = async (deployment, options = {}) => {
  * review it" versus "we are building it now" — without re-running the whole
  * decision.
  */
+/**
+ * Try again on an order that was held, not failed.
+ *
+ * ── Why this is a third door and not a flag on the other two ──
+ *
+ * The other two doors each assert a status: `onDeploymentCreated` refuses
+ * anything that is not `pending_review`, and `onAdminApproved` anything that
+ * is not `approved` or `failed`. Both assertions are load-bearing — they are
+ * what stops a running deployment being provisioned twice, which bills twice.
+ *
+ * A held order is in neither state. By the time a hold is placed the order has
+ * already been moved through `approved` to `provisioning`, because the hold
+ * happens at the launch, after the status moves. So retrying one through
+ * either existing door returns `NOT_PENDING` and nothing ever starts.
+ *
+ * Widening either door to let `provisioning` through would remove exactly the
+ * check that stops a double build. So this door makes the opposite assertion:
+ * it accepts ONLY an order that is actually on hold, and the hold is what
+ * makes a retry safe — a held order is one the platform has already decided
+ * not to build, so there is nothing running to build twice.
+ *
+ * Idempotent against itself: `provisionNow` goes through the driver, and the
+ * driver's `claim` refuses a second instance for a deployment that has one.
+ */
+const onHoldRetry = async (deployment, options = {}) => {
+  try {
+    if (!deployment?.holdKind) {
+      return idle('NOT_HELD', 'This deployment is not on hold, so there is nothing to retry.');
+    }
+    if (!['pending_review', 'approved', 'provisioning'].includes(deployment.status)) {
+      return idle('NOT_RETRYABLE', `Deployment is ${deployment.status}.`);
+    }
+
+    const { settings, cloud, route } = await context(deployment, options);
+
+    const gate = capGuard.decide({ cloud, gcp: settings?.[`${cloud}Settings`] || {} });
+    if (!gate.ok && QUIET_CODES.includes(gate.code)) {
+      // The cloud was switched off while the order waited. The hold stands.
+      return idle(gate.code, route.reason || gate.reason);
+    }
+
+    return await provisionNow(deployment, {
+      settings,
+      cloud,
+      approvedByAdmin: false,
+      actor: options.actor || null,
+    });
+  } catch (err) {
+    console.error(`[AutoProvision] Retry of held ${deployment?.id} failed:`, err);
+    return idle('UNEXPECTED', err.message);
+  }
+};
+
 const isAutomatic = async (settings = null) => {
   try {
     const adminSettingsService = require('../admin/adminSettingsService');
@@ -504,6 +678,8 @@ const isAutomatic = async (settings = null) => {
 module.exports = {
   onDeploymentCreated,
   onAdminApproved,
+  // The third door: an order that was held rather than failed — see its header.
+  onHoldRetry,
   isAutomatic,
   QUIET_CODES,
   // Re-exported so a caller does not have to require two modules to read a

@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import PageHeader from '../components/common/PageHeader';
 import PermissionGuard from '../components/guards/PermissionGuard';
+import SystemAlertsPanel from './settings/SystemAlertsPanel';
 import FormSection from '../components/common/FormSection';
 import TempEmailBlockingSettings from '../components/settings/TempEmailBlockingSettings';
 import EmailTemplatesSettings from '../components/settings/EmailTemplatesSettings';
@@ -289,6 +290,13 @@ const SettingsPage = () => {
               <Switch />
             </Form.Item>
           </FormSection>
+
+          {/*
+            * Outside the form on purpose: each row saves itself the moment it
+            * changes, because "who gets woken at 3am" is not a setting anybody
+            * should have to remember to press Save on.
+            */}
+          <SystemAlertsPanel />
           <PermissionGuard permission={PERMISSIONS.SETTINGS_EDIT}>
             <Button type="primary" icon={<SaveOutlined />} loading={saveLoading} onClick={() => handleSave('notifications', notificationForm)}>
               Save Notification Settings

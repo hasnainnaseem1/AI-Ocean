@@ -175,6 +175,13 @@ const toDeploymentDoc = (row) => ({
   },
   adminNotes: row.adminNotes,
   rejectionReason: row.rejectionReason,
+  // Why an order is waiting, as opposed to why one was turned down. Both have
+  // to round-trip: `toDeploymentDoc`, the `save()` payload and `createDeployment`
+  // are three separate lists in this hand-rolled ORM, and a column missing from
+  // any of them is silently never written.
+  holdReason: row.holdReason,
+  holdKind: row.holdKind,
+  heldAt: row.heldAt,
   assignedTo: row.assignedTo?.id || null,
   provisionedAt: row.provisionedAt,
   startedAt: row.startedAt,
@@ -351,6 +358,9 @@ const wrapDeployment = (row) => {
       endpointShutdownCompletedById: shutdownCompletedByPg,
       adminNotes: wrapped.adminNotes,
       rejectionReason: wrapped.rejectionReason,
+      holdReason: wrapped.holdReason,
+      holdKind: wrapped.holdKind,
+      heldAt: wrapped.heldAt,
       assignedToId: assignedToPg,
       provisionedAt: wrapped.provisionedAt,
       startedAt: wrapped.startedAt,

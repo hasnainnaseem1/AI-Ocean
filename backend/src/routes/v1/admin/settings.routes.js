@@ -437,6 +437,65 @@ router.put('/security', checkPermission('settings.edit'), async (req, res) => {
 
 // @route   PUT /api/admin/settings/notification
 // @desc    Update notification settings
+/**
+ * GET /api/v1/admin/settings/alerts
+ *
+ * Every system alert the platform can raise, who currently hears about it, and
+ * which groups it could be pointed at instead.
+ *
+ * The list of alerts is declared here rather than discovered, because an alert
+ * only exists if some code raises it — and a screen offering to configure one
+ * that nothing raises is worse than not offering it. As the other system
+ * alerts move onto this mechanism they get a row here.
+ */
+router.get('/alerts', checkPermission('settings.view'), async (req, res) => {
+  try {
+    const alertRecipients = require('../../../services/notification/alertRecipients');
+    const settings = await adminSettingsService.getSettings();
+
+    const CATALOGUE = [
+      {
+        key: 'regionWorkerDown',
+        name: 'Region build worker has stopped',
+        description: 'A customer is waiting for a region to be built and nothing is building it. '
+          + 'Their order will not start until it is back.',
+        severity: 'urgent',
+      },
+    ];
+
+    const rows = [];
+    for (const alert of CATALOGUE) {
+      const config = await alertRecipients.configFor(alert.key, { settings });
+      const resolved = config.audience === alertRecipients.AUDIENCE.OFF
+        ? { recipients: [] }
+        : await alertRecipients.resolve(config.audience, { emails: config.emails });
+
+      rows.push({
+        ...alert,
+        audience: config.audience,
+        email: config.email,
+        emails: config.emails || '',
+        // How many people this would actually reach today. A choice that
+        // reaches nobody is the failure this screen exists to prevent, and it
+        // is invisible unless shown.
+        reaches: resolved.recipients.length,
+        fellBack: !!resolved.fellBack,
+      });
+    }
+
+    res.json({
+      success: true,
+      alerts: rows,
+      audiences: await alertRecipients.options(),
+      // The platform-wide switch still wins: with it off, no alert emails.
+      emailEnabled: settings?.notificationSettings?.enableEmailNotifications !== false,
+    });
+  } catch (error) {
+    console.error('Alert settings error:', error);
+    res.status(500).json({ success: false, message: 'Error reading alert settings' });
+  }
+});
+
 // @access  Private (Admin with settings.edit permission)
 router.put('/notification', checkPermission('settings.edit'), async (req, res) => {
   try {
@@ -445,7 +504,8 @@ router.put('/notification', checkPermission('settings.edit'), async (req, res) =
       enablePushNotifications,
       notifyAdminOnNewcustomer,
       notifyAdminOnAutoSuspend,
-      notifyAdminOnNewTicket
+      notifyAdminOnNewTicket,
+      alerts,
     } = req.body;
     const clientIP = getClientIP(req);
 
@@ -465,6 +525,88 @@ router.put('/notification', checkPermission('settings.edit'), async (req, res) =
     }
     if (notifyAdminOnNewTicket !== undefined) {
       settings.notificationSettings.notifyAdminOnNewTicket = notifyAdminOnNewTicket;
+    }
+
+    /*
+     * Per-alert delivery: who hears about each system alert, and whether by
+     * email. Merged rather than replaced, so a screen that only knows about
+     * some alerts cannot wipe the settings for the others.
+     *
+     * The audience is validated against what actually exists — a role saved
+     * here that nobody holds is a silent misconfiguration, and the one place
+     * to catch it is the moment somebody chooses it.
+     */
+    if (alerts && typeof alerts === 'object') {
+      const alertRecipients = require('../../../services/notification/alertRecipients');
+      const allowed = new Set((await alertRecipients.options()).map((o) => o.value));
+
+      const current = settings.notificationSettings.alerts || {};
+      const merged = { ...current };
+
+      for (const [key, value] of Object.entries(alerts)) {
+        if (!value || typeof value !== 'object') continue;
+
+        const next = { ...(current[key] || {}) };
+
+        if (value.audience !== undefined) {
+          if (!allowed.has(String(value.audience))) {
+            return res.status(400).json({
+              success: false,
+              message: `"${value.audience}" is not a group that can be alerted. `
+                + 'It may be a role that was renamed or deactivated.',
+            });
+          }
+          next.audience = String(value.audience);
+        }
+        if (value.email !== undefined) next.email = !!value.email;
+
+        /*
+         * Typed-in addresses. Validated here rather than at send time,
+         * because a typo discovered at send time is discovered during the
+         * incident the alert was meant to warn about.
+         */
+        if (value.emails !== undefined) {
+          const list = alertRecipients.parseEmails(value.emails);
+          const bad = list.filter((e) => !alertRecipients.isEmail(e));
+
+          if (bad.length) {
+            return res.status(400).json({
+              success: false,
+              message: `${bad.length === 1 ? 'This does not look like an email address' : 'These do not look like email addresses'}: ${bad.join(', ')}`,
+            });
+          }
+
+          next.emails = list.join(', ');
+        }
+
+        /*
+         * Saving an EMPTY address list against "specific addresses" is
+         * refused — but only when the addresses are what is being saved.
+         *
+         * Selecting the option is the first half of a two-step action: pick
+         * it, then type the addresses into the box that appears. Refusing the
+         * first half means the option can never be chosen at all. So the
+         * check applies when `emails` is submitted, which is the moment the
+         * person has finished typing.
+         *
+         * The resolver still protects the gap in between: an audience of
+         * `custom` with nothing saved falls back to the admins rather than
+         * reaching nobody.
+         */
+        if (value.emails !== undefined
+          && (next.audience || current[key]?.audience) === alertRecipients.AUDIENCE.CUSTOM
+          && !alertRecipients.parseEmails(next.emails).length) {
+          return res.status(400).json({
+            success: false,
+            message: 'Add at least one email address, or choose a different group.',
+          });
+        }
+
+        merged[key] = next;
+      }
+
+      settings.notificationSettings.alerts = merged;
+      settings.markModified('notificationSettings');
     }
 
     settings.lastUpdatedBy = req.userId;
@@ -611,6 +753,28 @@ router.put('/cloud-pricing', checkPermission('settings.edit'), async (req, res) 
         gcp: providers.gcp !== false,
         aws: providers.aws !== false,
       };
+    }
+
+    if (req.body.autoPriceTiers !== undefined) {
+      cp.autoPriceTiers = !!req.body.autoPriceTiers;
+    }
+
+    if (req.body.floorTolerancePercent !== undefined) {
+      cp.floorTolerancePercent = clamp(req.body.floorTolerancePercent, 0, 50, cp.floorTolerancePercent || 0);
+    }
+
+    /*
+     * The curve points on the region-cost screen. Sanitised rather than
+     * trusted: a zero would divide a standing cost by nothing, and an unsorted
+     * or duplicated list draws a curve that appears to go backwards.
+     */
+    if (Array.isArray(req.body.regionCostLadder)) {
+      const counts = [...new Set(
+        req.body.regionCostLadder
+          .map((n) => Math.floor(Number(n)))
+          .filter((n) => Number.isFinite(n) && n > 0 && n <= 10000)
+      )].sort((a, b) => a - b).slice(0, 12);
+      if (counts.length) cp.regionCostLadder = counts;
     }
 
     settings.lastUpdatedBy = req.userId;
@@ -1470,6 +1634,317 @@ router.post('/aws/test', checkPermission('settings.edit'), awsController.testAws
  * so adding a region to one cloud and not the other cannot quietly produce a
  * tier nobody can launch.
  */
+/**
+ * GET /api/v1/admin/settings/region-costs
+ *
+ * What each region costs to keep open, and whether it is paying for itself.
+ *
+ * This is the number that was missing entirely until now. A NAT gateway on AWS
+ * is billed per availability zone whether a customer machine uses it or not —
+ * roughly $65 a month standing for a two-zone region — and nothing in the
+ * platform accounted for it, so a tier sold in a fresh AWS region was priced
+ * on the machine alone and served at a loss.
+ *
+ * Returns the ladder as well as the figure, because setting `assumedMachines`
+ * is picking a point on a steep curve: one machine carries fifty times what
+ * fifty do, and a single number hides that.
+ */
+router.get('/region-costs', checkPermission('settings.view'), async (req, res) => {
+  try {
+    const regionCostService = require('../../../services/cloud/regionCostService');
+    const regions = await regionCostService.overview();
+
+    res.json({
+      success: true,
+      regions,
+      // The ones costing money with nothing recovering it. Surfaced separately
+      // so a screen can lead with the problem rather than a table.
+      losing: regions
+        .filter((r) => !r.recovery.ok && r.fixedCostPerHour > 0)
+        .map((r) => ({
+          cloud: r.cloud,
+          region: r.region,
+          shortfallPerHour: r.recovery.shortfallPerHour,
+          machinesShort: r.recovery.machinesShort,
+        })),
+      // Regions with no figure at all. These price at zero if anything starts
+      // selling in them, which is the worst of the available outcomes.
+      uncosted: regions
+        .filter((r) => r.fixedCostPerHour === 0 && r.perMachineCostPerHour === 0)
+        .map((r) => `${r.cloud}/${r.region}`),
+    });
+  } catch (error) {
+    console.error('Region costs error:', error);
+    res.status(500).json({ success: false, message: 'Error reading region costs' });
+  }
+});
+
+/**
+ * PUT /api/v1/admin/settings/region-costs
+ *
+ * Two different things an operator can set, deliberately in one place but
+ * written through two different service calls:
+ *
+ *   `assumedMachines`  their judgement — how many machines to spread the
+ *                      standing cost over. The hourly refresh never touches it.
+ *   `fixedCostPerHour` a figure recorded by hand, for a cloud whose published
+ *                      wording this platform does not recognise. Better than a
+ *                      region priced at zero.
+ */
+router.put('/region-costs', checkPermission('settings.edit'), async (req, res) => {
+  try {
+    const regionCostService = require('../../../services/cloud/regionCostService');
+    const cloudRouter = require('../../../services/cloud/cloudRouter');
+    const cloudRegions = require('../../../services/cloud/cloudRegions');
+
+    const { cloud, region, assumedMachines, fixedCostPerHour, perMachineCostPerHour } = req.body || {};
+
+    if (!cloudRouter.isCloud(String(cloud || ''))) {
+      return res.status(400).json({
+        success: false,
+        message: `"${cloud}" is not a cloud this platform can build on.`,
+      });
+    }
+    if (!cloudRegions.commonRegions().includes(String(region || ''))) {
+      return res.status(400).json({
+        success: false,
+        message: `"${region}" is not a region this platform sells.`,
+      });
+    }
+
+    if (assumedMachines !== undefined) {
+      await regionCostService.setAssumedMachines(cloud, region, assumedMachines);
+    }
+    if (fixedCostPerHour !== undefined || perMachineCostPerHour !== undefined) {
+      await regionCostService.recordCost(cloud, region, {
+        fixedCostPerHour, perMachineCostPerHour,
+      });
+    }
+
+    const regions = await regionCostService.overview();
+    res.json({
+      success: true,
+      message: 'Region cost saved',
+      region: regions.find((r) => r.cloud === cloud && r.region === region) || null,
+    });
+  } catch (error) {
+    console.error('Region cost update error:', error);
+    res.status(500).json({ success: false, message: 'Error saving the region cost' });
+  }
+});
+
+/**
+ * POST /api/v1/admin/settings/region-costs/refresh
+ *
+ * Ask both clouds what their regions cost now, rather than waiting for the
+ * hourly job. Never zeroes a stored figure on failure — see the service.
+ */
+router.post('/region-costs/refresh', checkPermission('settings.edit'), async (req, res) => {
+  try {
+    const regionCostService = require('../../../services/cloud/regionCostService');
+    const summary = await regionCostService.refreshAll({ force: true });
+    res.json({ success: true, ...summary, results: undefined });
+  } catch (error) {
+    console.error('Region cost refresh error:', error);
+    res.status(500).json({ success: false, message: 'Error refreshing region costs' });
+  }
+});
+
+/**
+ * GET /api/v1/admin/settings/region-builds
+ *
+ * Which regions have a network and which do not — and, first in the list,
+ * which ones have customer orders waiting on them.
+ *
+ * Separate from `/region-costs` because they answer different questions and
+ * the answers come apart: a region is costed before it is built, deliberately,
+ * so that its standing cost is inside every price from the start. "What does
+ * it cost" and "can a machine start there" are two facts and an admin needs
+ * both.
+ *
+ * The list leads with waiting orders because that is the only part of it that
+ * is losing money right now.
+ */
+router.get('/region-builds', checkPermission('settings.view'), async (req, res) => {
+  try {
+    const regionDemand = require('../../../services/cloud/regionDemand');
+
+    // Re-derived from the saved ids first, so the page cannot show `built` for
+    // a region whose ids someone has since cleared.
+    await regionDemand.sync().catch((err) => console.error('Region sync error:', err.message));
+
+    const regions = await regionDemand.overview({ cloud: 'aws' });
+
+    res.json({
+      success: true,
+      regions,
+      /*
+       * Whether a build worker is running, which changes what this screen's
+       * button means: with one, asking for a region builds it; without one,
+       * the request is a note for a human. An admin watching a region that
+       * will never be built, with orders behind it, is the failure this
+       * prevents.
+       */
+      worker: await regionDemand.workerSeen(),
+      // The work list: regions with orders sitting on them, most first.
+      waiting: regions
+        .filter((r) => r.waitingDeployments > 0 && r.buildState !== 'built')
+        .map((r) => ({
+          region: r.region,
+          buildState: r.buildState,
+          waitingDeployments: r.waitingDeployments,
+          wantedAt: r.buildWantedAt,
+        })),
+    });
+  } catch (error) {
+    console.error('Region builds error:', error);
+    res.status(500).json({ success: false, message: 'Error reading region build states' });
+  }
+});
+
+/**
+ * POST /api/v1/admin/settings/region-builds/:region/build
+ *
+ * Ask for a region's network to be built.
+ *
+ * ── What this does NOT do, and why ──
+ *
+ * It does not run `terragrunt apply`, and this process holds no credential
+ * that could. A credential able to apply this stack owns the VPC, the
+ * firewall and the security groups of every region — and the platform's
+ * hardest guarantee is that one customer's machine can never reach another's,
+ * which rests on the runtime having no power to change a network at all. A key
+ * that could be read out of this process, by any bug anywhere in it, would
+ * make that guarantee unprovable. So the apply is performed from outside, and
+ * what this endpoint does is record the request, mark the region as being
+ * built, and tell the operator exactly what to run.
+ *
+ * The order the customer placed is unaffected either way: it is held with a
+ * readable wait and starts on its own once the ids are saved.
+ */
+router.post('/region-builds/:region/build', checkPermission('settings.edit'), async (req, res) => {
+  try {
+    const regionDemand = require('../../../services/cloud/regionDemand');
+    const awsShape = require('../../../services/aws/awsSettingsShape');
+    const regionMap = require('../../../services/aws/awsRegionMap');
+
+    const region = String(req.params.region || '').trim();
+
+    if (!regionMap.supportedAwsRegions().includes(region)) {
+      return res.status(400).json({
+        success: false,
+        message: `"${region}" is not an AWS region this platform sells.`,
+      });
+    }
+
+    const settings = await adminSettingsService.getSettings();
+    if (awsShape.configuredRegions(settings?.awsSettings || {}).includes(region)) {
+      return res.status(409).json({
+        success: false,
+        message: `${region} is already built — its ids are saved and machines can start there.`,
+      });
+    }
+
+    const marked = await regionDemand.markBuilding({ cloud: 'aws', region });
+    if (!marked.ok) {
+      return res.status(409).json({
+        success: false,
+        code: marked.code,
+        message: marked.code === 'ALREADY_BUILDING'
+          ? `A build for ${region} is already marked as running (since `
+            + `${marked.startedAt ? new Date(marked.startedAt).toISOString() : 'unknown'}). `
+            + 'If it did not finish, record it as failed before starting another.'
+          : `${region} is already built.`,
+      });
+    }
+
+    const waiting = await regionDemand.countWaiting('aws', region);
+
+    /*
+     * Is a build worker running? The same button means two different things
+     * depending on the answer — either the region is now being built, or a
+     * note has been left for a human — and an admin must not have to guess
+     * which, with orders waiting behind it.
+     */
+    const worker = await regionDemand.workerSeen();
+
+    res.json({
+      success: true,
+      region,
+      buildState: marked.state,
+      waitingDeployments: waiting,
+      worker,
+      message: worker.running
+        ? `${region} is being built now.`
+          + (waiting ? ` ${waiting} order(s) will start on their own when it is ready.` : '')
+        : `${region} is marked as being built — but no build worker is running, so nothing will `
+          + 'happen until somebody runs the commands below.',
+      /*
+       * The operator's actual instructions. Spelled out here rather than left
+       * in a document because this is the screen they are looking at when they
+       * need them — and still shown when a worker IS running, because an apply
+       * that fails leaves a human finishing it by hand.
+       */
+      howToRun: {
+        steps: [
+          `cd infra/aws/live/staging/${region}`,
+          'terragrunt run-all apply',
+          'Copy the outputs into Admin → Cloud → AWS for this region: '
+            + 'vpc_id, private_subnet_ids, security_group_id, and the AMI id for this region.',
+        ],
+        note: 'This is run with your own elevated credentials, not the platform\'s. '
+          + 'The platform\'s AWS key can start and stop machines and nothing else — it cannot '
+          + 'create or change a network, which is what keeps one customer\'s machine from ever '
+          + 'reaching another\'s.',
+        costWarning: 'A two-zone region costs roughly $65/month in NAT gateways from the moment '
+          + 'it is applied, whether or not anything runs in it. That standing cost is already '
+          + 'inside the price of every tier sold here.',
+      },
+    });
+  } catch (error) {
+    console.error('Region build error:', error);
+    res.status(500).json({ success: false, message: 'Error marking the region as building' });
+  }
+});
+
+/**
+ * POST /api/v1/admin/settings/region-builds/:region/failed
+ *
+ * Record that an apply did not finish, so the region stops reading as
+ * `building` forever and an admin can try again. The reason is kept for the
+ * admin and never reaches a customer — it names our own infrastructure.
+ */
+router.post('/region-builds/:region/failed', checkPermission('settings.edit'), async (req, res) => {
+  try {
+    const regionDemand = require('../../../services/cloud/regionDemand');
+    const regionMap = require('../../../services/aws/awsRegionMap');
+
+    const region = String(req.params.region || '').trim();
+    if (!regionMap.supportedAwsRegions().includes(region)) {
+      return res.status(400).json({
+        success: false,
+        message: `"${region}" is not an AWS region this platform sells.`,
+      });
+    }
+
+    await regionDemand.markFailed({
+      cloud: 'aws',
+      region,
+      error: String(req.body?.error || 'Recorded as failed by an administrator.'),
+    });
+
+    res.json({
+      success: true,
+      region,
+      message: `${region} is recorded as failed. Orders there keep waiting rather than failing, `
+        + 'so a retry starts them.',
+    });
+  } catch (error) {
+    console.error('Region build failure error:', error);
+    res.status(500).json({ success: false, message: 'Error recording the build failure' });
+  }
+});
+
 router.get('/cloud-regions', checkPermission('settings.view'), async (req, res) => {
   try {
     const cloudRegions = require('../../../services/cloud/cloudRegions');
@@ -1511,6 +1986,10 @@ router.get('/cloud-regions', checkPermission('settings.view'), async (req, res) 
     res.json({
       success: true,
       common,
+      // The fallback a tier uses when it has not been given its own margin.
+      // Served here so the tier form can show what "leave blank" will mean
+      // rather than making an operator go and look it up.
+      targetMarginPercent: Number(settings?.cloudPricingSettings?.targetMarginPercent) || 0,
       regions: detail,
       ready: detail.filter((d) => d.ready).map((d) => d.region),
       // Regions one cloud has and the other does not, with the reason. Empty

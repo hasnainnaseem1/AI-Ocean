@@ -133,7 +133,7 @@ class LemonSqueezyService {
        * thrown as a bare Error, which meant the customer was told to go and
        * edit an Admin Center they cannot reach.
        */
-      // eslint-disable-next-line no-console
+       
       console.error(
         `[LemonSqueezy] No top-up variant configured for ${currency} ${amount}. `
         + 'Add one in Admin Center → Integrations → LemonSqueezy → Top-up variants, '

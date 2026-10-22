@@ -73,7 +73,7 @@ const Line = ({ label, children, isDark }) => (
  * rather than reconstruct it from earlier screens.
  */
 const ReviewStep = ({
-  step, model, tier, deploymentName, region, regions, onRegionChange,
+  step, model, tier, deploymentName, region, regions, places, onRegionChange,
   answers, questions, currency, wallet, creditsEnabled, eyebrow,
   machineOptions, onChangeMachine,
 }) => {
@@ -187,15 +187,42 @@ const ReviewStep = ({
             />
           )}
 
-          {regions && regions.length > 1 && (
+          {/*
+            * Where it runs, and what that costs.
+            *
+            * The same machine costs a different amount in each region — on AWS
+            * a region carries a standing NAT charge of its own — so the price
+            * belongs next to the choice. Without it a customer picks blind and
+            * then sees a number at checkout they had no way to predict.
+            *
+            * Shown even with one region, which it was not before: a single
+            * silent region meant the customer never learned where their
+            * machine was, and could not tell why one tier cost more than
+            * another that looked identical.
+            */}
+          {places && places.length > 0 && (
             <Line label={t('common:label.region')} isDark={isDark}>
-              <Select
-                size="small"
-                value={region}
-                onChange={onRegionChange}
-                options={regions.map((r) => ({ value: r, label: r }))}
-                style={{ minWidth: 140 }}
-              />
+              {places.length === 1 ? (
+                <Text style={{ fontSize: 13 }}>{places[0].region}</Text>
+              ) : (
+                <Select
+                  size="small"
+                  value={region}
+                  onChange={onRegionChange}
+                  style={{ minWidth: 210 }}
+                  options={places.map((p) => ({
+                    value: p.region,
+                    label: (
+                      <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                        <span>{p.region}</span>
+                        <span style={{ opacity: 0.65 }}>
+                          {currency} {formatRate(p.pricePerHour)}/hr
+                        </span>
+                      </span>
+                    ),
+                  }))}
+                />
+              )}
             </Line>
           )}
 

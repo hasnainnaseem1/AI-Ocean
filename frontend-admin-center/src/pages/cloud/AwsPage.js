@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Tabs, Space, Tag, Badge } from 'antd';
 import {
-  ApiOutlined, ThunderboltOutlined, DollarOutlined, DisconnectOutlined,
+  ApiOutlined, ThunderboltOutlined, DollarOutlined, DisconnectOutlined, GlobalOutlined,
 } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import AwsConnectionTab from './AwsConnectionTab';
 import CloudProvisioningTab from './CloudProvisioningTab';
 import CloudPricingTab from './CloudPricingTab';
 import CloudOrphansPanel from './CloudOrphansPanel';
+import CloudRegionBuilds from './CloudRegionBuilds';
 import settingsApi from '../../api/settingsApi';
+import CloudSetupSteps from './CloudSetupSteps';
 import deploymentsApi from '../../api/deploymentsApi';
 
 /**
@@ -46,19 +48,30 @@ const AWS_TYPE_PATTERN = /^[a-z0-9]+\.[a-z0-9]+$/;
 
 const AwsPage = () => {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const [aws, setAws] = useState({});
   const [orphans, setOrphans] = useState(0);
+  const [regionCosts, setRegionCosts] = useState([]);
+  const [regionsWaiting, setRegionsWaiting] = useState(0);
 
   const loadSummary = useCallback(async () => {
-    const [data, orph] = await Promise.all([
+    const [data, orph, costs, builds] = await Promise.all([
       settingsApi.getSettings().catch(() => null),
       // This cloud's own, so the badge counts AWS machines rather than every
       // cloud's — a count that moves when Google has a problem would be read
       // as an AWS problem.
       deploymentsApi.getOrphans({ cloud: 'aws', limit: 1 }).catch(() => null),
+      // For the setup steps: whether this cloud's regions have been costed.
+      settingsApi.getRegionCosts().catch(() => null),
+      // Orders held because their region has no network yet.
+      settingsApi.getRegionBuilds().catch(() => null),
     ]);
     setAws(data?.settings?.awsSettings || {});
     setOrphans(orph?.unresolved || 0);
+    setRegionCosts((costs?.regions || []).filter((r) => r.cloud === 'aws'));
+    setRegionsWaiting(
+      (builds?.waiting || []).reduce((sum, w) => sum + (w.waitingDeployments || 0), 0),
+    );
   }, []);
 
   useEffect(() => { loadSummary(); }, [loadSummary]);
@@ -96,6 +109,24 @@ const AwsPage = () => {
       ),
     },
     {
+      key: 'regions',
+      label: (
+        <Space>
+          <GlobalOutlined />
+          Regions
+          {/*
+            * Badged for the same reason orphans are: a held order earns
+            * nothing and appears nowhere else. On AWS a network belongs to one
+            * region, so an order in a region nobody has built waits until
+            * somebody does — and a tab nobody opens is the wrong place to keep
+            * that number.
+            */}
+          {regionsWaiting > 0 && <Badge count={regionsWaiting} />}
+        </Space>
+      ),
+      children: <CloudRegionBuilds />,
+    },
+    {
       key: 'orphans',
       label: (
         <Space>
@@ -120,6 +151,20 @@ const AwsPage = () => {
         breadcrumbs={[{ label: 'Home', path: '/' }, { label: 'Cloud', path: '/cloud' }, { label: 'AWS' }]}
         extra={<Tag color={state.color}>{state.text}</Tag>}
       />
+      {/*
+        * What state this cloud is in and what to do next, above the tabs that
+        * hold the detail. On AWS this matters more than on Google: a region
+        * with no network in it looks exactly like a working one until a
+        * customer's machine fails to build there.
+        */}
+      <CloudSetupSteps
+        cloud="aws"
+        label="AWS"
+        settings={aws}
+        regionCosts={regionCosts}
+        onGoToTab={(tab) => (tab === 'overview' ? navigate('/cloud') : setParams({ tab }))}
+      />
+
       <Tabs
         activeKey={params.get('tab') || 'connection'}
         // Kept in the URL so an admin can link a colleague straight to the tab

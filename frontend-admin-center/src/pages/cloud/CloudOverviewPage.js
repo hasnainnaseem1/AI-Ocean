@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Row, Col, Space, Tag, Typography, Button, Divider, Spin, Statistic, Alert,
-  Select, message,
+  Select, Switch, message,
 } from 'antd';
 import {
   CloudServerOutlined, ArrowRightOutlined, CheckCircleOutlined,
@@ -10,6 +10,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import CloudPricingSettings from '../../components/settings/CloudPricingSettings';
+import CloudRegionCosts from './CloudRegionCosts';
 import { usePermission } from '../../hooks/usePermission';
 import { PERMISSIONS } from '../../utils/permissions';
 import settingsApi from '../../api/settingsApi';
@@ -49,6 +50,7 @@ const CloudOverviewPage = () => {
   // Per cloud, so the alert can send an admin to the page that can act on it.
   const [orphansByCloud, setOrphansByCloud] = useState({});
   const [savingDefault, setSavingDefault] = useState(false);
+  const [togglingCloud, setTogglingCloud] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,6 +96,8 @@ const CloudOverviewPage = () => {
       to: '/cloud/gcp',
       state: gcpState,
       ready: true,
+      enabled: !!gcp.enabled,
+      connected: !!(gcp.projectId && gcp.hasServiceAccountKey),
       rows: [
         ['Project', gcp.projectId || 'Not set'],
         ['Credentials', gcp.hasServiceAccountKey ? 'Stored (encrypted)' : 'Not stored'],
@@ -110,6 +114,8 @@ const CloudOverviewPage = () => {
       to: '/cloud/aws',
       state: awsState,
       ready: true,
+      enabled: !!aws.enabled,
+      connected: !!(aws.accountId && aws.hasSecretAccessKey),
       rows: [
         ['Account', aws.accountId || 'Not set'],
         ['Credentials', aws.hasSecretAccessKey ? 'Stored (encrypted)' : 'Not stored'],
@@ -128,6 +134,29 @@ const CloudOverviewPage = () => {
     ...(gcp.enabled ? [{ value: 'gcp', label: 'Google Cloud' }] : []),
     ...(aws.enabled ? [{ value: 'aws', label: 'Amazon Web Services' }] : []),
   ];
+
+  /**
+   * Turn a cloud on or off from here.
+   *
+   * Only `enabled` is sent: the rest of that cloud's settings are its own
+   * screen's business, and a partial save from here that carried stale form
+   * values would quietly overwrite them.
+   */
+  const toggleCloud = async (cloud, on) => {
+    setTogglingCloud(cloud);
+    try {
+      const update = cloud === 'aws' ? settingsApi.updateAws : settingsApi.updateGcp;
+      await update({ enabled: on });
+      message.success(on
+        ? `${cloud === 'aws' ? 'AWS' : 'Google Cloud'} is on. It still needs dry run turned off before it builds anything for real.`
+        : `${cloud === 'aws' ? 'AWS' : 'Google Cloud'} is off. Machines already running there are not affected.`);
+      await load();
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Could not change that');
+    } finally {
+      setTogglingCloud(null);
+    }
+  };
 
   const setDefaultCloud = async (value) => {
     setSavingDefault(true);
@@ -228,6 +257,47 @@ const CloudOverviewPage = () => {
                   ))}
                 </div>
 
+                {/*
+                  * The on/off switch, here rather than only two levels down on
+                  * the cloud's Provisioning tab.
+                  *
+                  * It is the first thing somebody setting this up needs and the
+                  * last thing they could find: both of the controls that make a
+                  * two-cloud platform work — the per-model assignment and the
+                  * default cloud — appear only once two clouds are ON, so the
+                  * screen that would tell you two clouds are possible was itself
+                  * hidden until you already had them.
+                  */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    padding: '10px 0 2px',
+                    borderTop: `1px solid ${hairline(isDark)}`,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <Text strong style={{ fontSize: 13, display: 'block' }}>
+                      Build machines here
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {p.connected
+                        ? 'Both clouds can be on at once.'
+                        : 'Connect it first — a switch with no credential does nothing.'}
+                    </Text>
+                  </div>
+                  <Switch
+                    checked={!!p.enabled}
+                    disabled={!canEdit || !p.connected || togglingCloud === p.key}
+                    loading={togglingCloud === p.key}
+                    onChange={(on) => toggleCloud(p.key, on)}
+                    checkedChildren="On"
+                    unCheckedChildren="Off"
+                  />
+                </div>
+
                 <Button
                   type={p.ready ? 'primary' : 'default'}
                   icon={<ArrowRightOutlined />}
@@ -283,6 +353,30 @@ const CloudOverviewPage = () => {
           * without consulting a default at all. A control that does nothing is
           * worse than an absent one: somebody sets it and expects an effect.
           */}
+        {/*
+          * With fewer than two clouds on, the default-cloud control decides
+          * nothing — but something still has to be said, because the two
+          * features that make a two-cloud platform work (this, and assigning
+          * each model to a cloud) BOTH appear only once two clouds are on. An
+          * operator who has never had two on has no way to learn they exist.
+          */}
+        {enabled.length <= 1 && (
+          <Card
+            style={{ borderRadius: 12, marginTop: 20 }}
+            title={<Space><ApartmentOutlined />Running both clouds at once</Space>}
+          >
+            <Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0, maxWidth: 820 }}>
+              {enabled.length === 0
+                ? 'Neither cloud is on, so nothing is being built automatically.'
+                : `Only ${enabled[0].label} is on, so every deployment goes there and nothing has to choose.`}
+              {' '}Switch the other one on above and two more controls appear: each model can be
+              sent to the cloud that suits it — under <Text strong>AI Models</Text>, a
+              {' '}<Text strong>Cloud</Text> column — and this card becomes the fallback for models
+              you have not assigned.
+            </Paragraph>
+          </Card>
+        )}
+
         {enabled.length > 1 && (
           <Card
             style={{ borderRadius: 12, marginTop: 20 }}
@@ -335,6 +429,15 @@ const CloudOverviewPage = () => {
         <Card style={{ borderRadius: 12 }}>
           <CloudPricingSettings canUpdate={canEdit} />
         </Card>
+
+        {/*
+          * Below the shared policy, because it is the same kind of thing —
+          * what a machine-hour truly costs — but the one part of it that
+          * differs per region rather than applying everywhere.
+          */}
+        <div style={{ marginTop: 16 }}>
+          <CloudRegionCosts />
+        </div>
       </Spin>
     </div>
   );

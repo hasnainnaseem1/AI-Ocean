@@ -108,6 +108,39 @@ const provision = async (deployment) => {
   }
 
   const { zone, plan } = placement;
+
+  /*
+   * Is Google actually built in this region?
+   *
+   * Checked before the instance row is claimed, for the same reason the AWS
+   * driver does it: claiming a row for a machine that cannot be placed leaves
+   * a `planned` row pointing at a region with no subnet.
+   *
+   * Google's VPC is global but its SUBNETS are regional, so a region the
+   * platform sells can still have nothing to place a machine in. Reaching the
+   * insert instead returns a raw Google error about a subnetwork resource —
+   * which reads as our fault and tells the customer nothing.
+   *
+   * NOT permanent: "not built here yet" is the expected state of every region
+   * on the day its first customer arrives. The caller holds the order, tells
+   * the customer a region is being set up, and asks for it to be built.
+   */
+  const gcpRegion = String(zone).replace(/-[a-z]$/, '');
+  const ready = await gcpClient.regionReady(gcpRegion).catch((err) => ({
+    ok: false, code: 'REGION_NOT_CONFIGURED', message: err.message, missing: [],
+  }));
+
+  if (!ready.ok) {
+    const needsRegion = ready.code === 'REGION_NOT_CONFIGURED';
+    return outcome(false, true, ready.message, {
+      code: ready.code,
+      permanent: !needsRegion,
+      needsRegion,
+      gcpRegion,
+      missing: ready.missing || [],
+    });
+  }
+
   const config = await gcpClient.config().catch(() => ({}));
   const instanceName = naming.instanceName(deployment.id);
 

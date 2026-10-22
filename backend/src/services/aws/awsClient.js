@@ -185,7 +185,20 @@ class AwsClient {
     if (!infra.ok) {
       const err = new Error(infra.message);
       err.code = infra.code;
-      err.permanent = true;
+      /*
+       * NOT permanent, and that distinction is the whole of the region flow.
+       *
+       * "AWS is not built in this region" is the expected state of every
+       * region on the day its first customer arrives: the platform costs and
+       * sells a region before building it, deliberately, so the region's
+       * standing cost is inside the price from the start. Calling it permanent
+       * moved the order to `failed` — a dead end for one that only needed to
+       * wait — and put this very message, with an `infra/aws/live/...` path in
+       * it, in front of the customer.
+       */
+      err.permanent = false;
+      err.needsRegion = true;
+      err.missing = infra.missing || [];
       throw err;
     }
     return infra;
@@ -421,19 +434,93 @@ class AwsClient {
     };
   }
 
+  /**
+   * What AWS says about one instance right now.
+   *
+   * This is the AWS answer to Google's "poll the operation". `RunInstances`
+   * returns immediately with an id and no operation to follow, so the instance
+   * itself is the only source of truth — its `instanceState` moves
+   * `pending → running` on its own, or `pending → terminated` when the launch
+   * fails after being accepted.
+   *
+   * `stateReason` matters as much as the state: an instance that terminates
+   * itself seconds after launch (`Server.InsufficientInstanceCapacity`,
+   * `Client.VolumeLimitExceeded`) is a *failure*, and without the reason it
+   * looks exactly like a machine somebody stopped on purpose.
+   */
   async describeInstance(instanceId, az) {
     await this.initialize();
-    if (this.dryRun) return { dryRun: true, state: 'running', privateIp: '10.30.0.10', publicIp: null };
+    if (this.dryRun) {
+      return {
+        dryRun: true,
+        state: 'running',
+        privateIp: '10.30.0.10',
+        publicIp: null,
+        launchTime: new Date().toISOString(),
+      };
+    }
 
     const region = this.regionForAz(az);
     const xml = await this.call('DescribeInstances', { 'InstanceId.1': instanceId }, { region });
+
+    /*
+     * `<stateReason>` carries the machine-readable code and is the one we
+     * want. EC2 also returns `<reason>` as prose; it is kept only for the
+     * admin screen, never for a decision.
+     */
+    const stateReason = xml.match(/<stateReason>[\s\S]*?<code>([^<]+)<\/code>[\s\S]*?<message>([^<]*)<\/message>/);
+
     return {
+      stateReasonCode: stateReason?.[1] || null,
+      stateReasonMessage: stateReason?.[2] || null,
+      instanceType: (xml.match(/<instanceType>([^<]+)<\/instanceType>/) || [])[1] || null,
+      found: /<instanceId>/.test(xml),
       dryRun: false,
       state: (xml.match(/<instanceState>[\s\S]*?<name>([^<]+)<\/name>/) || [])[1] || null,
       privateIp: (xml.match(/<privateIpAddress>([^<]+)<\/privateIpAddress>/) || [])[1] || null,
       publicIp: (xml.match(/<ipAddress>([^<]+)<\/ipAddress>/) || [])[1] || null,
       launchTime: (xml.match(/<launchTime>([^<]+)<\/launchTime>/) || [])[1] || null,
       xml,
+    };
+  }
+
+  /**
+   * Find an instance by the Name tag this platform gave it.
+   *
+   * For the adopt case: the launch call timed out or came back ambiguous, so
+   * the instance id was never recorded, but AWS may well have built the
+   * machine. Without this the row sits with no handle while a real instance
+   * runs and bills — the exact shape of an orphan, created by us.
+   *
+   * Terminated instances are excluded. EC2 keeps them visible for about an
+   * hour, and adopting a tombstone would record a machine that is already gone
+   * and start a meter for it.
+   */
+  async findInstanceByName(name, region) {
+    await this.initialize();
+    if (this.dryRun) return null;
+
+    const xml = await this.call('DescribeInstances', {
+      'Filter.1.Name': 'tag:Name',
+      'Filter.1.Value.1': name,
+      'Filter.2.Name': 'instance-state-name',
+      'Filter.2.Value.1': 'pending',
+      'Filter.2.Value.2': 'running',
+      'Filter.2.Value.3': 'stopping',
+      'Filter.2.Value.4': 'stopped',
+    }, { region });
+
+    const id = (xml.match(/<instanceId>([^<]+)<\/instanceId>/) || [])[1];
+    if (!id) return null;
+
+    return {
+      instanceId: id,
+      state: (xml.match(/<instanceState>[\s\S]*?<name>([^<]+)<\/name>/) || [])[1] || null,
+      az: (xml.match(/<availabilityZone>([^<]+)<\/availabilityZone>/) || [])[1] || null,
+      privateIp: (xml.match(/<privateIpAddress>([^<]+)<\/privateIpAddress>/) || [])[1] || null,
+      publicIp: (xml.match(/<ipAddress>([^<]+)<\/ipAddress>/) || [])[1] || null,
+      launchTime: (xml.match(/<launchTime>([^<]+)<\/launchTime>/) || [])[1] || null,
+      instanceType: (xml.match(/<instanceType>([^<]+)<\/instanceType>/) || [])[1] || null,
     };
   }
 

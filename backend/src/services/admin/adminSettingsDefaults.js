@@ -134,6 +134,21 @@ module.exports = {
     notifyAdminOnNewcustomer: true,
     notifyAdminOnAutoSuspend: true,
     notifyAdminOnNewTicket: true,
+
+    /**
+     * Per-alert delivery: who hears about it, and whether by email.
+     *
+     * Keyed by alert, so a billing team can get unbilled-usage alerts without
+     * also being woken by isolation alerts. Each entry is
+     * `{ audience, email }`, where audience is 'admins', 'super_admins',
+     * 'role:<CustomRole name>' or 'off'.
+     *
+     * Empty by default: an alert with no entry here falls back to its own
+     * default (every active admin), which is exactly what the code did before
+     * any of this was configurable. So an installation that never opens this
+     * screen behaves as it always has.
+     */
+    alerts: {},
   },
   lemonSqueezySettings: {
     enabled: false,
@@ -447,6 +462,41 @@ module.exports = {
      * Not a kill switch for the cloud — that lives on the cloud's own page.
      */
     providers: { gcp: true, aws: true },
+
+    /**
+     * May the hourly refresh set a tier's selling price?
+     *
+     * On: each cell's price is its own cost plus the tier's margin, kept in
+     * step with what the clouds charge. Off: the refresh still works out and
+     * records what everything costs, but leaves every price alone.
+     *
+     * The off position is for an operator who wants to set prices by hand and
+     * use this only as a cost report. It is deliberately not a kill switch for
+     * the refresh itself — knowing what a machine costs must not depend on
+     * whether we let the platform act on it.
+     */
+    autoPriceTiers: true,
+
+    /**
+     * The machine counts shown on the region-cost curve.
+     *
+     * A setting rather than a constant because what counts as a realistic
+     * region differs by platform: a few large customers and a long tail of
+     * small ones want different points on the curve. Nothing breaks if these
+     * change — they only decide which rows the admin screen draws.
+     */
+    regionCostLadder: [1, 2, 5, 10, 25, 50],
+
+    /**
+     * How far below its floor a price may drift before the refresh calls the
+     * cell `below_floor` rather than `sellable`.
+     *
+     * Not zero, because a cent of float would otherwise flip cells in and out
+     * of sellable every hour as a provider's published rate moves in its last
+     * decimal place — and each flip is a region disappearing from a customer's
+     * region picker for no reason they could see.
+     */
+    floorTolerancePercent: 0.5,
   },
   features: {
     enableCustomerSignup: true,

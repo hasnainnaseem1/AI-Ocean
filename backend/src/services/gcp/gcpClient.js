@@ -394,6 +394,104 @@ class GcpClient {
   /* ── Checks ──────────────────────────────────────────────────────────── */
 
   /**
+   * Is this region's network actually built?
+   *
+   * ── Why this is its own check ──
+   *
+   * Google's VPC is global, so there is one network for every region — but
+   * its **subnets are regional**, and a machine cannot be placed in a region
+   * whose subnet does not exist. "We sell this region" and "we have built
+   * this region" are therefore two different facts on Google exactly as they
+   * are on AWS, even though the thing that is missing is smaller.
+   *
+   * Without this, the first order into a region nobody has built reached
+   * `insert instance` and came back as a raw Google error about a subnetwork
+   * resource — which reads as a platform fault, leaves a failed row behind,
+   * and tells the customer nothing they can act on.
+   *
+   * Shaped to match `awsSettingsShape.infraFor`: `{ ok: false, code, message }`
+   * rather than a throw, with `REGION_NOT_CONFIGURED` so the provisioning
+   * path holds the order and asks for the region instead of failing it.
+   */
+  async regionReady(gcpRegion) {
+    await this.initialize();
+
+    if (this.dryRun) {
+      // Dry run exists so the whole chain can be exercised before a network
+      // does — see `infraFor` on the AWS client for the same reasoning.
+      return { ok: true, dryRun: true, gcpRegion };
+    }
+
+    const { projectId, network } = this._settings;
+    const subnet = `${network}-${gcpRegion}`;
+
+    try {
+      await this.request('GET', `/projects/${projectId}/regions/${gcpRegion}/subnetworks/${subnet}`);
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'REGION_NOT_CONFIGURED',
+        message: `Google Cloud is not set up in ${gcpRegion} — there is no "${subnet}" subnet. `
+          + 'Apply infra/gcp/live/<env> so the network exists there.',
+        missing: ['subnet'],
+        gcpRegion,
+      };
+    }
+
+    /*
+     * ── A subnet alone is not a usable region ──
+     *
+     * The deny rules ARE the isolation: without them a customer's machine can
+     * reach every other machine on the network. A half-applied region has
+     * exactly that shape — the network, subnet and NAT succeed, and the
+     * firewall unit fails on its own (a missing `compute.securityAdmin` does
+     * precisely this, and it is not hypothetical: it happened on the first
+     * real apply of this project).
+     *
+     * Checking only the subnet would then report the region ready and place
+     * customer machines into a network with no isolation at all. So the deny
+     * rules are required too, and a region missing them is `not configured` —
+     * the same answer as a region with no network, because from a customer's
+     * point of view it is the same: nothing may be placed there.
+     */
+    try {
+      const xml = await this.request('GET', `/projects/${projectId}/global/firewalls`);
+      const names = JSON.stringify(xml || {});
+      const required = [`${network}-deny-ingress-all`, `${network}-deny-egress-private`];
+      const absent = required.filter((rule) => !names.includes(rule));
+
+      if (absent.length) {
+        return {
+          ok: false,
+          code: 'REGION_NOT_CONFIGURED',
+          message: `Google Cloud is not fully set up for "${network}" — the isolation rules `
+            + `${absent.join(' and ')} do not exist. The network is there but customer machines `
+            + 'would not be isolated from each other, so nothing may be placed in it. '
+            + 'Re-apply infra/gcp/live/<env>; a missing compute.securityAdmin role on the build '
+            + 'account is the usual cause.',
+          missing: ['firewall'],
+          gcpRegion,
+        };
+      }
+    } catch (err) {
+      // Could not ask. NOT read as "isolation is fine" — an unanswered
+      // question and a failed check are different, and only one is safe to
+      // ignore.
+      return {
+        ok: false,
+        code: 'REGION_NOT_CONFIGURED',
+        message: `Could not confirm the isolation rules for "${network}": ${err.message}`,
+        missing: ['firewall'],
+        gcpRegion,
+      };
+    }
+
+    // Both halves are there: a subnet to place the machine in, and the deny
+    // rules that keep it away from every other customer's.
+    return { ok: true, gcpRegion, subnet };
+  }
+
+  /**
    * Does this shape actually exist in this zone?
    *
    * The spec mapper knows GCP's *rules* — how many vCPUs a shape has, which GPU

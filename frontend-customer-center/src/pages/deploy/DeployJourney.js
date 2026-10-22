@@ -704,6 +704,7 @@ const DeployJourney = () => {
       // this empty keeps the region selector hidden rather than offering a
       // list this machine was never quoted against.
       regions: [],
+      places: [],
       bookable: true,
       meetsVram: true,
     });
@@ -734,12 +735,47 @@ const DeployJourney = () => {
     setSearchParams({ machine: picked.slug || picked.tierId }, { replace: true });
   }, [machineOptions, setSearchParams]);
 
+  /*
+   * Where this machine can actually run, each with its own price.
+   *
+   * Asked of the server rather than read off the tier: a tier's region list is
+   * what an operator put on it, while whether a region can be SERVED depends
+   * on the cloud this model runs on and on that region having a worked-out
+   * price. Offering one we cannot fill takes an order we cannot honour.
+   */
+  const [places, setPlaces] = useState([]);
+
   useEffect(() => {
-    if (selectedTier?.regions?.length) {
-      setRegion((current) =>
-        current && selectedTier.regions.includes(current) ? current : selectedTier.regions[0]);
+    const tierId = selectedTier?.tierId;
+    if (!tierId || !model?.id || selectedTier?.isCustom) {
+      setPlaces([]);
+      return undefined;
     }
-  }, [selectedTier]);
+
+    let live = true;
+    deploymentsApi.getPlaces({ modelId: model.id, tierId })
+      .then((data) => { if (live) setPlaces(data.places || []); })
+      // A failed lookup leaves the picker on the tier's own region list rather
+      // than blocking the order — the server checks the region again at create
+      // time, so a stale list cannot become a bad deployment.
+      .catch(() => { if (live) setPlaces([]); });
+
+    return () => { live = false; };
+  }, [selectedTier, model?.id]);
+
+  /** Where the customer can choose from, priced where we know the prices. */
+  const offeredPlaces = places.length
+    ? places
+    : (selectedTier?.regions || []).map((r) => ({
+      region: r, pricePerHour: selectedTier?.pricePerHour,
+    }));
+
+  useEffect(() => {
+    const regions = offeredPlaces.map((p) => p.region);
+    if (!regions.length) return;
+    setRegion((current) => (current && regions.includes(current) ? current : regions[0]));
+    // Keyed on the region names rather than the array, which is rebuilt each render.
+  }, [offeredPlaces.map((p) => p.region).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * The actual "commit money" step now happens in CheckoutModal, which
@@ -950,6 +986,10 @@ const DeployJourney = () => {
             deploymentName={deploymentName}
             region={region}
             regions={selectedTier?.regions}
+            // Each place with its own price, so the choice and its cost sit
+            // together. Falls back to the bare region list for a machine the
+            // server has not priced per place.
+            places={offeredPlaces}
             onRegionChange={setRegion}
             answers={answers}
             questions={allQuestions}

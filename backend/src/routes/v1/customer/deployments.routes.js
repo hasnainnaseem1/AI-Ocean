@@ -26,6 +26,13 @@ router.get('/', deploymentsEnabled, view, deploymentController.getDeployments);
 router.get('/questionnaire', deploymentsEnabled, view, deploymentController.getQuestionnaire);
 router.get('/journey', deploymentsEnabled, view, recommendationController.getJourney);
 router.get('/checkout-options', deploymentsEnabled, create, deploymentController.getCheckoutOptions);
+// @route  GET /api/v1/customer/deployments/places
+// @desc   Where a machine can run, and what each place costs
+//
+// Its own call rather than a field on the recommendation: "which machine" and
+// "where to put it" are different questions, asked on different screens, and
+// the second needs a price per place that the first has no use for.
+router.get('/places', deploymentsEnabled, create, deploymentController.getPlaces);
 router.get('/:id', deploymentsEnabled, view, deploymentController.getDeployment);
 router.get('/:id/usage', deploymentsEnabled, view, deploymentController.getUsage);
 router.get('/:id/api-key', deploymentsEnabled, requirePermission('deployments.apiKey'), deploymentController.revealApiKey);

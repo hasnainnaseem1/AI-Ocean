@@ -12,6 +12,7 @@ import PageHeader from '../../components/common/PageHeader';
 import DataTable, { rowActions } from '../../components/common/DataTable';
 import { StatRow, StatCard } from '../../components/StatRow';
 import deploymentsApi from '../../api/deploymentsApi';
+import { formatRate } from '../../utils/money';
 
 const { Text } = Typography;
 

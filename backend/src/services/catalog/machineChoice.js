@@ -38,6 +38,89 @@ const platformRegions = async () => {
 const fail = (status, code, message) => ({ error: { status, code, message } });
 
 /**
+ * What this machine costs where the customer wants it.
+ *
+ * ── Why a rate now depends on a region ──
+ *
+ * The same tier is a different machine on each cloud (`m6i.large` here,
+ * `e2-standard-2` there) at a different rate, and a different rate again in
+ * each region — and on AWS each region carries a standing NAT charge of its
+ * own. One number for everywhere means under-charging in at least one of them.
+ *
+ * ── The three answers, in order ──
+ *
+ *   a region was asked for   that place's price, or a refusal if it is not
+ *                            somewhere this can actually be built
+ *   no region yet            the cheapest place, so the figure first shown is
+ *                            one the customer could really get
+ *   no prices at all         the tier's own catalogue rate, for a platform
+ *                            that has not connected a cloud yet
+ *
+ * ── Why an unknown region is refused rather than defaulted ──
+ *
+ * The controller used to accept whatever region string arrived and fall back
+ * to `regions[0]`, so a customer asking for somewhere we cannot build was
+ * silently given somewhere else — at a price quoted for the place they did not
+ * get. Being told no is the better outcome of the two.
+ */
+const rateForPlace = async ({ tier, model, settings, region, fallbackRate }) => {
+  const tierPriceService = require('../cloud/tierPriceService');
+
+  const offer = await tierPriceService.offerFor({ tier, model, settings })
+    .catch((err) => {
+      // Pricing must never be the reason an order cannot be placed at all.
+      console.error(`[MachineChoice] Could not price ${tier.name}:`, err.message);
+      return null;
+    });
+
+  const stoppedFallback = catalogService.stoppedRateForTier(model, tier) || 0;
+
+  if (!offer || !offer.places.length) {
+    return {
+      rate: fallbackRate,
+      stoppedRate: stoppedFallback,
+      places: (tier.regions || []).map((r) => ({
+        region: r, pricePerHour: fallbackRate, stoppedPricePerHour: stoppedFallback, regionBuilt: false,
+      })),
+      cloud: offer?.cloud ?? null,
+      source: 'tier',
+    };
+  }
+
+  if (!region) {
+    // The cheapest, because `places` comes back sorted and the first thing a
+    // customer sees should be a price they can actually have.
+    const cheapest = offer.places[0];
+    return {
+      rate: cheapest.pricePerHour,
+      stoppedRate: cheapest.stoppedPricePerHour,
+      places: offer.places,
+      cloud: offer.cloud,
+      source: offer.source,
+    };
+  }
+
+  const place = offer.places.find((p) => p.region === region);
+  if (!place) {
+    const available = offer.places.map((p) => p.region);
+    return {
+      error: fail(400, 'REGION_NOT_AVAILABLE',
+        available.length
+          ? `${tier.name} cannot be deployed in "${region}". It is available in ${available.join(', ')}.`
+          : `${tier.name} cannot be deployed anywhere just now. Please choose another machine.`),
+    };
+  }
+
+  return {
+    rate: place.pricePerHour,
+    stoppedRate: place.stoppedPricePerHour,
+    places: offer.places,
+    cloud: offer.cloud,
+    source: offer.source,
+  };
+};
+
+/**
  * @param {Object}  params
  * @param {Object}  params.model        already loaded and known active
  * @param {String}  [params.tierId]     a catalogue machine's id or slug
@@ -46,17 +129,22 @@ const fail = (status, code, message) => ({ error: { status, code, message } });
  * @param {Boolean} [params.requireBookable] true at create time, false for a
  *   quote — stock is transient, and refusing to even price an out-of-stock
  *   machine tells the customer nothing useful.
+ * @param {String}  [params.region]     where the customer wants it. The same
+ *   machine costs a different amount on each cloud and in each region, so the
+ *   rate depends on this — see `cloud/tierPriceService.offerFor`. Omitted for a
+ *   first quote, where the cheapest place is used so the figure shown is the
+ *   one the customer could actually get.
  */
 const resolve = async ({
-  model, tierId, customBuild: build, settings, requireBookable = false,
+  model, tierId, customBuild: build, settings, requireBookable = false, region = null,
 }) => {
   if (build && Array.isArray(build.picks) && build.picks.length) {
     return resolveCustom({ model, build, settings });
   }
-  return resolveCatalogue({ model, tierId, settings, requireBookable });
+  return resolveCatalogue({ model, tierId, settings, requireBookable, region });
 };
 
-const resolveCatalogue = async ({ model, tierId, settings, requireBookable }) => {
+const resolveCatalogue = async ({ model, tierId, settings, requireBookable, region = null }) => {
   if (!tierId) {
     return fail(400, 'TIER_REQUIRED', 'Please choose a machine for this deployment.');
   }
@@ -82,6 +170,18 @@ const resolveCatalogue = async ({ model, tierId, settings, requireBookable }) =>
     ? await catalogService.findTierCategoryById(tier.categoryId)
     : null;
 
+  /*
+   * What this machine costs where the customer wants it.
+   *
+   * `listRate` above was `tier.pricePerHour x the model's multiplier` — one
+   * number for everywhere. That was right when there was one cloud and one
+   * region; now the same machine costs a different amount on each cloud and in
+   * each region, and quoting one figure means under-charging in at least one
+   * of them.
+   */
+  const offer = await rateForPlace({ tier, model, settings, region, fallbackRate: listRate });
+  if (offer.error) return offer.error;
+
   return {
     machine: {
       isCustom: false,
@@ -102,10 +202,16 @@ const resolveCatalogue = async ({ model, tierId, settings, requireBookable }) =>
         // parts list.
         networkGbps: tier.networkGbps,
       },
-      listRate,
-      listStoppedRate: catalogService.stoppedRateForTier(model, tier) || 0,
+      listRate: offer.rate,
+      listStoppedRate: offer.stoppedRate,
       currency: tier.currency || settings.currency,
-      regions: tier.regions || [],
+      // Where this can actually be built, each with its own price. The bare
+      // `tier.regions` list is no longer enough: a region the tier is sold in
+      // but which has no sellable price is not somewhere an order can be taken.
+      regions: offer.places.map((p) => p.region),
+      places: offer.places,
+      cloud: offer.cloud,
+      priceSource: offer.source,
       bookable: catalogService.isBookable(tier),
       customBuild: null,
     },
@@ -138,6 +244,33 @@ const resolveCustom = async ({ model, build, settings }) => {
     return fail(400, 'CUSTOM_BUILD_VRAM_SHORT',
       `${model.name} needs at least ${needsVramGb} GB of VRAM and this machine has ${totalVramGb} GB. `
       + 'It would not load. Please add accelerators or choose a larger one.');
+  }
+
+  /*
+   * The model's other floors, checked for the same reason as VRAM.
+   *
+   * A model needing two cards does not need them because of anyone's traffic —
+   * the weights do not fit on one. Built short, the machine is provisioned,
+   * starts charging by the hour, and then fails to load: the one outcome where
+   * a customer pays for something that was never going to work.
+   *
+   * Only what the MODEL states. What the customer's answers imply is advice —
+   * the sizing engine ranks on it and warns, and this platform does not refuse
+   * an order because somebody's traffic estimate suggested something larger.
+   */
+  const built = priced.specs || {};
+  const shortfalls = [
+    ['accelerators', model.minGpuCount, built.gpuCount, ''],
+    ['vCPU', model.minVcpu, built.vcpu, ''],
+    ['RAM', model.minRamGb, built.ramGb, ' GB'],
+  ].filter(([, needs, has]) => Number(needs) > 0 && Number(has || 0) < Number(needs));
+
+  if (shortfalls.length) {
+    const said = shortfalls
+      .map(([what, needs, has, unit]) => `${needs}${unit} of ${what} (this has ${has || 0}${unit})`)
+      .join(', ');
+    return fail(400, 'CUSTOM_BUILD_TOO_SMALL',
+      `${model.name} needs at least ${said}. It would not run. Please build a larger machine.`);
   }
 
   return {

@@ -7,6 +7,7 @@ import { SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { modelsApi, tiersApi } from '../../api/catalogApi';
+import { formatRate } from '../../utils/money';
 
 const { Text } = Typography;
 
@@ -64,6 +65,9 @@ const ModelFormPage = () => {
           displayOrder: 0,
           contextLength: 0,
           minVramGb: 0,
+          minGpuCount: 0,
+          minVcpu: 0,
+          minRamGb: 0,
         });
         const data = await tiersApi.getTiers({ isActive: true });
         setTiers(data.tiers || []);
@@ -144,7 +148,7 @@ const ModelFormPage = () => {
         <Space direction="vertical" size={0}>
           <Text strong>{name}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {row.gpuCount}× {row.gpuModel} · {row.vramGb}GB VRAM · {row.currency} {row.pricePerHour.toFixed(2)}/hr
+            {row.gpuCount}× {row.gpuModel} · {row.vramGb}GB VRAM · {row.currency} {formatRate(row.pricePerHour)}/hr
           </Text>
         </Space>
       ),
@@ -188,7 +192,7 @@ const ModelFormPage = () => {
         const link = tierLinks[row.id];
         if (!link?.enabled) return <Text type="secondary">—</Text>;
         const rate = row.pricePerHour * (link.priceMultiplier ?? 1);
-        return <Text strong>{row.currency} {rate.toFixed(2)}/hr</Text>;
+        return <Text strong>{row.currency} {formatRate(rate)}/hr</Text>;
       },
     },
   ];
@@ -264,6 +268,48 @@ const ModelFormPage = () => {
                 </Col>
                 <Col span={8}>
                   <Form.Item name="minVramGb" label="Minimum VRAM (GB)" help="Warns on undersized tiers">
+                    <InputNumber min={0} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              {/*
+                * What this model needs to LOAD.
+                *
+                * Separate from anything the customer's answers imply: a model
+                * needing two cards does not need them because of somebody's
+                * traffic, it needs them because the weights do not fit on one.
+                * Sizing takes the stricter of the two, so leaving these at 0
+                * changes nothing — which is also why every existing model
+                * keeps working untouched.
+                */}
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 14, borderRadius: 10 }}
+                message="What this model needs to run at all"
+                description="Leave at 0 for anything you have not measured. These are the floor
+                  beneath the sizing engine: a machine smaller than this is flagged however light
+                  the customer's workload is, and a custom build below it is refused outright."
+              />
+
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item
+                    name="minGpuCount"
+                    label="Minimum accelerators"
+                    help="How many cards the weights need"
+                  >
+                    <InputNumber min={0} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="minVcpu" label="Minimum vCPU">
+                    <InputNumber min={0} step={0.5} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="minRamGb" label="Minimum RAM (GB)">
                     <InputNumber min={0} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>

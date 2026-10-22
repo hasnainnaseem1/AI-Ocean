@@ -672,6 +672,17 @@ model Tier {
   pricePerHour        Decimal @default(0) @map("price_per_hour") @db.Decimal(12, 4)
   stoppedPricePerHour Decimal @default(0) @map("stopped_price_per_hour") @db.Decimal(12, 4)
 
+  /// What this tier should earn over its cost, as a percentage.
+  ///
+  /// The one number an operator sets to price this tier everywhere: the hourly
+  /// refresh works out what the machine costs on each cloud in each region and
+  /// adds this on top, filling the whole `prices` table from it.
+  ///
+  /// Null means "use the platform default" from `cloudPricingSettings`, so a
+  /// business-wide change to the target margin reaches every tier that has not
+  /// deliberately been given its own.
+  targetMarginPercent Decimal? @map("target_margin_percent") @db.Decimal(7, 4)
+
   currency String @default("USD")
 
   // ── Hardware spec (derived from components when present, hand-entered otherwise) ──
@@ -708,6 +719,7 @@ model Tier {
   deployments                     Deployment[]           @relation("DeploymentTier")
   deploymentSizingRecommendations Deployment[]           @relation("DeploymentSizingRecommendedTier")
   capacityEvents                  TierCapacityEvent[]    @relation("TierCapacityEventTier")
+  prices                          TierPrice[]            @relation("TierPriceTier")
 
   @@index([slug])
   @@index([isActive])
@@ -762,6 +774,213 @@ model TierCapacityEvent {
   @@map("tier_capacity_events")
 }
 
+/**
+ * What one tier costs us, and what it sells for, on ONE cloud in ONE region.
+ *
+ * ── Why a tier cannot have a single price any more ──
+ *
+ * `Tier.pricePerHour` is one number. That was right when there was one cloud
+ * and one region. It is wrong now: the same machine costs a different amount
+ * on Google than on AWS, and a different amount in Mumbai than in Ireland. One
+ * price across all of them means that in some cell we are either uncompetitive
+ * or — the one that matters — selling below cost.
+ *
+ * So a tier's price is a small table rather than a number: one row per
+ * (tier × cloud × region). Six rows for two clouds and three regions.
+ *
+ * ── Which half is computed, and which is chosen ──
+ *
+ * Everything down to `floorPricePerHour` is COST, recomputed hourly by
+ * `jobs/tierPriceRefresh.js` from the cloud's own live rates. Nobody types it.
+ *
+ * `sellPricePerHour` is the only number that is chosen — and normally it is
+ * not typed either: the refresh sets it to this row's own floor, so one margin
+ * decision prices the whole table. An admin who overrides a single cell sets
+ * `sellPriceIsOverridden`, and the job then leaves that cell alone; without
+ * the flag the next hourly pass would silently undo their edit.
+ *
+ * ── Why cost is stored rather than computed on demand ──
+ *
+ * A customer opening the deploy screen must not set off a fan-out of provider
+ * price calls, and a provider outage must not make the catalogue unsellable.
+ * The stored figure is what is shown and what is charged; `capGuard` re-checks
+ * against live cost before building, as the backstop.
+ */
+model TierPrice {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tierId String @map("tier_id") @db.Uuid
+  tier   Tier   @relation("TierPriceTier", fields: [tierId], references: [id], onDelete: Cascade)
+
+  /// 'gcp' | 'aws' — the names cloudRouter uses.
+  cloud String
+
+  /// The PLATFORM region ("eu-central"), not the cloud's own ("eu-west-1").
+  /// The platform name is what a tier and a deployment carry; the provider's
+  /// name is an implementation detail of whichever cloud serves it.
+  region String
+
+  /// What this tier actually builds as here, recorded so an admin can see that
+  /// "2 vCPU / 8 GB" became `m6i.large` on one cloud and `e2-standard-2` on the
+  /// other.
+  machineType String @default("") @map("machine_type")
+
+  // ── Cost. Refreshed hourly, never typed. ──
+
+  /// The machine and its disk, as the provider charges for them.
+  providerCostPerHour Decimal @default(0) @map("provider_cost_per_hour") @db.Decimal(12, 6)
+
+  /// This machine's share of what the REGION costs before any machine runs in
+  /// it — chiefly NAT. On AWS that is a flat per-gateway charge that exists at
+  /// zero machines; on Google it scales per VM and is nearly nothing. See
+  /// `CloudRegionCost`, which holds the figure this share is divided out of.
+  regionalSharePerHour Decimal @default(0) @map("regional_share_per_hour") @db.Decimal(12, 6)
+
+  overheadPerHour  Decimal @default(0) @map("overhead_per_hour") @db.Decimal(12, 6)
+  taxPerHour       Decimal @default(0) @map("tax_per_hour") @db.Decimal(12, 6)
+  totalCostPerHour Decimal @default(0) @map("total_cost_per_hour") @db.Decimal(12, 6)
+
+  /// `totalCostPerHour` × (1 + margin). Nothing may be sold below this.
+  floorPricePerHour Decimal @default(0) @map("floor_price_per_hour") @db.Decimal(12, 6)
+
+  /// 'live' | 'recorded' | 'unknown' — where the provider figure came from.
+  costSource String    @default("unknown") @map("cost_source")
+  costAsOf   DateTime? @map("cost_as_of")
+
+  // ── Sell ──
+
+  sellPricePerHour    Decimal @default(0) @map("sell_price_per_hour") @db.Decimal(12, 4)
+  stoppedPricePerHour Decimal @default(0) @map("stopped_price_per_hour") @db.Decimal(12, 4)
+
+  /// An admin typed this cell's price. The hourly refresh must not overwrite it.
+  sellPriceIsOverridden Boolean @default(false) @map("sell_price_is_overridden")
+
+  /// 'sellable' | 'below_floor' | 'unpriced' | 'unbuildable'
+  /// Only `sellable` may be offered to a customer. `unbuildable` means this
+  /// cloud has no shape for these specs at all — a single A100 on AWS, where
+  /// they are sold only in eights.
+  status String @default("unpriced")
+
+  lastError String @default("") @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tierId, cloud, region], map: "tier_prices_identity_key")
+  // The customer's question: "which regions can I have this tier in, on the
+  // cloud my model runs on, right now?"
+  @@index([cloud, region, status])
+  @@index([tierId, status])
+  @@map("tier_prices")
+}
+
+/**
+ * What a REGION costs before a single customer machine runs in it.
+ *
+ * ── The cost with no customer attached to it ──
+ *
+ * Opening a region is not free. A NAT gateway on AWS is about $0.045 an hour
+ * per availability zone and is charged whether zero machines use it or a
+ * hundred — roughly $65 a month, per region, standing. Google's Cloud NAT
+ * charges per VM instead, so the same region costs almost nothing until it is
+ * used.
+ *
+ * That difference is the whole reason this table exists. Without it the first
+ * customer in a fresh AWS region is served at a loss that nothing in the
+ * system can see.
+ *
+ * ── How it reaches a price ──
+ *
+ * `regionalSharePerHour = fixedCostPerHour / max(assumedMachines, 1)`, added
+ * into every `TierPrice` row for that cloud and region.
+ *
+ * `assumedMachines` is a judgement, not a measurement: how many machines the
+ * operator expects to spread the standing cost across. It defaults to 1, which
+ * is the only setting that cannot lose money — and which also prices a new
+ * region high enough that it may never fill. `liveMachines` records what is
+ * actually running, so the gap between the two is visible rather than guessed
+ * at, and the admin screen states the break-even count outright.
+ */
+model CloudRegionCost {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  cloud  String
+  region String
+
+  /// The standing cost of having this region open at all, read live from the
+  /// provider where it publishes it. On AWS this is the NAT gateways, charged
+  /// per availability zone whether anything uses them or not.
+  fixedCostPerHour Decimal @default(0) @map("fixed_cost_per_hour") @db.Decimal(12, 6)
+
+  /// The part of the regional cost that DOES scale with machines, charged once
+  /// per machine rather than spread.
+  ///
+  /// Kept apart from `fixedCostPerHour` because the two clouds put their NAT
+  /// charge in different places: AWS bills a gateway whether or not anything
+  /// uses it, while Google bills per VM attached to the NAT. Folding Google's
+  /// per-VM charge into the fixed figure would make it correct only at the
+  /// exact moment `liveMachines` happened to equal `assumedMachines`, and
+  /// wrong — in whichever direction loses money — the rest of the time.
+  perMachineCostPerHour Decimal @default(0) @map("per_machine_cost_per_hour") @db.Decimal(12, 6)
+
+  /// 'live' | 'recorded' | 'unknown'
+  costSource String    @default("unknown") @map("cost_source")
+  costAsOf   DateTime? @map("cost_as_of")
+
+  /// How many machines to spread the standing cost across. A judgement.
+  /// 1 is the only value that cannot lose money.
+  assumedMachines Int @default(1) @map("assumed_machines")
+
+  /// How many are actually running here, counted by the refresh. Reporting
+  /// only, never an input to a price — a price that moved with live occupancy
+  /// would charge two customers differently for the same hour.
+  liveMachines Int @default(0) @map("live_machines")
+
+  /// ── Whether this region's network has actually been built ──
+  ///
+  /// Separate from whether it is COSTED, and that separation is the point. The
+  /// platform costs and sells a region before building it, so the region's
+  /// standing cost is inside every price from the start and the first customer
+  /// there is not subsidised. What is missing on day one is the network, not
+  /// the price.
+  ///
+  /// 'unbuilt'  — sold and costed, nothing applied there yet
+  /// 'wanted'   — an order is waiting on it; someone should build it
+  /// 'building' — an apply is running
+  /// 'built'    — the ids are in settings and launches work
+  /// 'failed'   — an apply was tried and did not finish
+  buildState String @default("unbuilt") @map("build_state")
+
+  /// How many orders are waiting on this region right now. Drives the admin's
+  /// work list: a region with orders on it is urgent, one without is a plan.
+  waitingDeployments Int @default(0) @map("waiting_deployments")
+
+  /// When a build was last asked for, started and finished — so an apply that
+  /// died halfway can be told from one that was never started.
+  buildWantedAt   DateTime? @map("build_wanted_at")
+  buildStartedAt  DateTime? @map("build_started_at")
+  buildFinishedAt DateTime? @map("build_finished_at")
+
+  /// Why the last build failed, for the admin. Never shown to a customer — it
+  /// names our own infrastructure.
+  buildError String @default("") @map("build_error")
+
+  /// When the region build worker last said it was alive.
+  ///
+  /// The worker is a separate process, under a different OS user, holding a
+  /// credential the API deliberately cannot read. So the API cannot inspect
+  /// it — being able to would be the access this design exists to avoid — and
+  /// a heartbeat is the only honest way to know whether asking for a region
+  /// will actually build one, or merely leave a note for a human.
+  workerSeenAt DateTime? @map("worker_seen_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([cloud, region], map: "cloud_region_costs_identity_key")
+  @@map("cloud_region_costs")
+}
+
 // One line of a tier's bill of materials. `{ _id: false }` in the source —
 // a child row of its parent, with no identity of its own.
 model TierComponent {
@@ -813,7 +1032,30 @@ model AIModel {
 
   parameterSize String @default("") @map("parameter_size")
   contextLength Int    @default(0) @map("context_length")
-  minVramGb     Float  @default(0) @map("min_vram_gb")
+
+  /**
+   * What this model needs to run at all.
+   *
+   * ── Why these are on the MODEL and not only in the answers ──
+   *
+   * Until now a model declared one number, `minVramGb`, and everything else a
+   * machine had to provide — cards, cores, memory — was inferred from what the
+   * customer said about their workload. That works for "how busy will it be"
+   * and not at all for "will it start": a model needing two cards does not
+   * need them because of anyone's traffic, it needs them because the weights
+   * do not fit on one.
+   *
+   * Sizing takes the stricter of the two, so an answer that implies more still
+   * wins. These are the floor beneath that.
+   *
+   * Zero means "not stated", which is why they default to 0 rather than to a
+   * guess: a model nobody has filled in must not start refusing machines that
+   * used to run it.
+   */
+  minVramGb   Float @default(0) @map("min_vram_gb")
+  minGpuCount Int   @default(0) @map("min_gpu_count")
+  minVcpu     Float @default(0) @map("min_vcpu")
+  minRamGb    Float @default(0) @map("min_ram_gb")
 
   supportedTiers AIModelSupportedTier[] @relation("AIModelSupportedTiers")
   useCases       AIModelUseCase[]       @relation("AIModelUseCases")
@@ -1901,6 +2143,32 @@ model Deployment {
 
   adminNotes      String  @default("") @map("admin_notes")
   rejectionReason String  @default("") @map("rejection_reason")
+
+  /**
+   * Why this order is waiting, in words the customer reads.
+   *
+   * Separate from `rejectionReason`, which means an admin turned the order
+   * down and it is over. This one means the opposite: the order stands, the
+   * platform cannot fill it yet, and the customer has something to decide.
+   *
+   * The case it was built for is a price that moved. A customer is quoted a
+   * rate, and between the quote and the build the cloud raises its own — so
+   * the machine would now earn less than this platform is set to need. The
+   * order is not wrong and the customer did nothing; the price is ours to fix,
+   * usually within the hour.
+   *
+   * Saying nothing was the worse option. The customer saw "under review" with
+   * no reason and no end to it, and the only way out was to give up.
+   */
+  holdReason String @default("") @map("hold_reason")
+
+  /// 'repricing' | 'capacity' | 'funds' | '' — what KIND of wait this is, so
+  /// the screen can offer the right way forward rather than one generic line.
+  holdKind String @default("") @map("hold_kind")
+
+  /// When the hold was placed, so the customer can be told how long it has
+  /// been and the screen can stop promising "within the hour" after an hour.
+  heldAt DateTime? @map("held_at")
   assignedToId    String? @map("assigned_to_id") @db.Uuid
   assignedTo      User?   @relation("DeploymentAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
 

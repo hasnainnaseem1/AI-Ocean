@@ -13,6 +13,9 @@ const teamSeatFee = require('./teamSeatFee');
 const analyticsRollup = require('./analyticsRollup');
 const gcpReconciler = require('./gcpReconciler');
 const awsReconciler = require('./awsReconciler');
+const isolationAudit = require('./isolationAudit');
+const regionWorkerWatchdog = require('./regionWorkerWatchdog');
+const tierPriceService = require('../services/cloud/tierPriceService');
 
 /* ─── Built-in system jobs ─── */
 const systemJobs = {
@@ -167,6 +170,54 @@ const systemJobs = {
     runCount: 0,
     task: null,
   },
+  tierPriceRefresh: {
+    name: 'Tier Price Refresh',
+    description: 'Works out what every tier costs on each cloud in each region — the machine, '
+      + "that region's standing cost, overhead and tax — and keeps each price in step with it",
+    /**
+     * Hourly, matching how long the providers' own price caches hold.
+     *
+     * This is what makes the margin guard a backstop rather than a daily
+     * obstruction: if the matrix tracks what the clouds charge, a price can
+     * only fall below its floor in the gap between one pass and the next.
+     * Running it more often would re-ask providers for figures that move on
+     * the order of months; running it less leaves that gap open for longer.
+     */
+    schedule: '15 * * * *',
+    scheduleLabel: 'Hourly',
+    system: true,
+    enabled: true,
+    lastRun: null,
+    lastStatus: null,
+    lastError: null,
+    runCount: 0,
+    task: null,
+  },
+  awsReconciler: {
+    name: 'AWS Machine Reconciler',
+    description: 'Finds out whether machines asked for on AWS actually came up, starts the '
+      + 'billing clock the moment one does, and retries what failed transiently',
+    /**
+     * Every minute, like its Google counterpart, and for the same reason: this
+     * is where the money clock starts.
+     *
+     * The interval is not about throughput — it only polls instances with an
+     * open question. It is about two directions of loss. A machine that came
+     * up is already costing this platform, and the meter cannot start until
+     * this job notices; the charge is back-dated to AWS's own `launchTime` so
+     * nothing is given away, but a build that *failed* leaves a customer
+     * watching a spinner until a pass sees it.
+     */
+    schedule: '* * * * *',
+    scheduleLabel: 'Every minute',
+    system: true,
+    enabled: true,
+    lastRun: null,
+    lastStatus: null,
+    lastError: null,
+    runCount: 0,
+    task: null,
+  },
   awsOrphanSweep: {
     name: 'AWS Orphan Sweep',
     description: 'Finds machines on AWS that this platform created and can no longer account for — '
@@ -182,11 +233,72 @@ const systemJobs = {
      * region, so a minute-by-minute schedule would be one call per region per
      * minute, forever, to answer a question whose answer almost never changes.
      *
-     * When AWS status polling and the billing clock are written, they belong on
-     * their own minute-by-minute schedule, and this stays where it is.
+     * Status polling and the billing clock run separately, every minute, as
+     * `awsReconciler` above — that is where lateness costs money.
      */
     schedule: '*/15 * * * *',
     scheduleLabel: 'Every 15 minutes',
+    system: true,
+    enabled: true,
+    lastRun: null,
+    lastStatus: null,
+    lastError: null,
+    runCount: 0,
+    task: null,
+  },
+  isolationAudit: {
+    name: 'Customer Isolation Audit',
+    description: 'Asks AWS whether each built region is still isolating customer machines from '
+      + 'each other, and stops placing customers in one that is not',
+    /**
+     * Every thirty minutes.
+     *
+     * The thing this watches for is a change that produces NO other symptom:
+     * one word in one network ACL rule, after which every customer machine in
+     * a region can reach every other. Nothing is created, no bill moves, no
+     * error is raised. The only way it is ever noticed is by asking.
+     *
+     * Thirty minutes is the window in which that could be true without anyone
+     * knowing, and it is chosen against the cost of asking: two API calls per
+     * built region per run, which at three regions is trivial. A daily audit
+     * would make that window a day; a per-minute one would buy little, because
+     * the realistic causes (a leaked credential, a console edit, a careless
+     * script) are not things that resolve on their own in under half an hour.
+     *
+     * The build worker runs the same check on every apply, so this one exists
+     * entirely for what happens AFTERWARDS.
+     */
+    schedule: '*/30 * * * *',
+    scheduleLabel: 'Every 30 minutes',
+    system: true,
+    enabled: true,
+    lastRun: null,
+    lastStatus: null,
+    lastError: null,
+    runCount: 0,
+    task: null,
+  },
+  regionWorkerWatchdog: {
+    name: 'Region Build Worker Watchdog',
+    description: 'Notices when the region build worker has stopped while customer orders are '
+      + 'waiting for a region, and tells the admins by notification and email',
+    /**
+     * Every five minutes.
+     *
+     * The worker is a separate process the API deliberately cannot inspect —
+     * that separation is what keeps a network-admin credential out of the API
+     * — so the only way to know it has died is that its heartbeat went quiet.
+     *
+     * Five minutes against a heartbeat considered stale after five: an outage
+     * is reported within about ten minutes, which is inside the half hour a
+     * customer is told a region takes. Alerting faster would catch a worker
+     * mid-apply and call it dead; slower and the customer notices before we do.
+     *
+     * The alert is latched, so one outage is one email rather than one every
+     * five minutes until somebody wakes up.
+     */
+    schedule: '*/5 * * * *',
+    scheduleLabel: 'Every 5 minutes',
     system: true,
     enabled: true,
     lastRun: null,
@@ -220,7 +332,11 @@ const systemRunners = {
   teamSeatFee: teamSeatFee.run,
   analyticsRollup: analyticsRollup.run,
   gcpReconciler: gcpReconciler.run,
+  tierPriceRefresh: tierPriceService.refreshAll,
+  awsReconciler: awsReconciler.pollPending,
   awsOrphanSweep: awsReconciler.runOnce,
+  isolationAudit: isolationAudit.run,
+  regionWorkerWatchdog: regionWorkerWatchdog.run,
 };
 
 /* ─── Custom jobs (loaded from DB at init, keyed by DB _id) ─── */

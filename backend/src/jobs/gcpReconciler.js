@@ -44,12 +44,18 @@
  * in the sweep would then destroy live workloads. It raises; an admin decides.
  */
 const prisma = require('../lib/prismaClient');
+// Whether each region's network exists yet, re-derived every pass from Google
+// itself — see services/cloud/regionDemand.js.
+const regionDemand = require('../services/cloud/regionDemand');
 const gcpClient = require('../services/gcp/gcpClient');
 const instanceStore = require('../services/gcp/deploymentInstanceService');
 const gcpDriver = require('../services/gcp/gcpDriver');
 const classifier = require('../services/gcp/gcpErrorClassifier');
 const naming = require('../services/gcp/gcpInstanceNaming');
 const adminSettingsService = require('../services/admin/adminSettingsService');
+// The meter. Shared with the AWS reconciler so both clouds charge by exactly
+// the same rules — see services/billing/computeClock.js.
+const computeClock = require('../services/billing/computeClock');
 
 /** How long a machine may sit mid-build before a human is told. */
 const STALE_AFTER_MINUTES = 20;
@@ -119,77 +125,6 @@ const isDryRunOperation = (name) => typeof name === 'string' && name.startsWith(
 /* ────────────────────────────────────────────────────────────────────────────
  * Starting and stopping the meter
  * ──────────────────────────────────────────────────────────────────────────── */
-
-/**
- * The machine is up: start charging for it.
- *
- * Written through `deploymentService`'s wrapper rather than with a raw Prisma
- * update, because `Deployment` is behind a hand-rolled ORM whose `save()`
- * writes from an in-memory snapshot — a raw update here would be overwritten by
- * the next `save()` anywhere else.
- *
- * Idempotent: a clock that is already running is left exactly where it is.
- * Re-planting it would move the watermark forward and write off the hours in
- * between.
- */
-const startComputeClock = async (deploymentId, runningAt) => {
-  const deploymentService = require('../services/deployment/deploymentService');
-  const deployment = await deploymentService.findById(deploymentId);
-  if (!deployment) return { started: false, reason: 'deployment is gone' };
-
-  if (deployment.computeClockStartedAt) {
-    return { started: false, reason: 'already running', at: deployment.computeClockStartedAt };
-  }
-
-  // Never ahead of the present. A clock in the future would make the first
-  // billing pass compute negative hours.
-  const at = new Date(Math.min(new Date(runningAt).getTime(), Date.now()));
-
-  deployment.computeClockStartedAt = at;
-  /*
-   * The watermark. `deploymentBilling` bills from `lastBilledAt || startedAt`
-   * and plants its own watermark at `now` when both are missing — so leaving
-   * this unset would give away everything between the machine starting and the
-   * first billing pass noticing. Only moved forward, never back.
-   */
-  if (!deployment.lastBilledAt || new Date(deployment.lastBilledAt) < at) {
-    deployment.lastBilledAt = at;
-  }
-  await deployment.save();
-
-  return { started: true, at };
-};
-
-/**
- * The machine is down: stop charging compute for it.
- *
- * Clearing the clock is what makes `isComputeBillable` false again, so the
- * elapsed time has to be settled *first* — otherwise the hours between the last
- * billing pass and the machine stopping become unbillable the instant the clock
- * is cleared, which is a silent write-off of delivered compute.
- */
-const stopComputeClock = async (deploymentId, stoppedAt) => {
-  const deploymentService = require('../services/deployment/deploymentService');
-  const deploymentBilling = require('../services/billing/deploymentBilling');
-
-  const deployment = await deploymentService.findById(deploymentId);
-  if (!deployment || !deployment.computeClockStartedAt) return { stopped: false };
-
-  const at = new Date(Math.min(new Date(stoppedAt || Date.now()).getTime(), Date.now()));
-
-  try {
-    await deploymentBilling.billOutstanding(deployment, { now: at, save: false });
-  } catch (err) {
-    // Not fatal, and not silent: the watermark has not moved, so the hours are
-    // still owed and the next pass bills them — as long as the deployment is
-    // still billable by something, which a paused one is.
-    console.error(`[GCP] Could not settle compute before stopping the clock on ${deploymentId}:`, err.message);
-  }
-
-  deployment.computeClockStartedAt = null;
-  await deployment.save();
-  return { stopped: true, at };
-};
 
 /* ────────────────────────────────────────────────────────────────────────────
  * One instance at a time
@@ -301,7 +236,7 @@ const settleRunning = async (instance, { runningAt, dryRun }, summary) => {
     machineType: live?.machineType ? String(live.machineType).split('/').pop() : null,
   });
 
-  const clock = await startComputeClock(instance.deploymentId, runningAt);
+  const clock = await computeClock.start(instance.deploymentId, runningAt);
   summary.running += 1;
   if (clock.started) summary.clocksStarted += 1;
 
@@ -339,7 +274,7 @@ const reconcileOne = async (instance, { gcp, now }, summary) => {
     }
     if (instance.phase === 'stopping') {
       await instanceStore.markStopped(instance.id, { stoppedAt: now });
-      await stopComputeClock(instance.deploymentId, now);
+      await computeClock.stop(instance.deploymentId, now);
       summary.stopped += 1;
       return;
     }
@@ -366,7 +301,7 @@ const reconcileOne = async (instance, { gcp, now }, summary) => {
     }
     if (live?.status === 'TERMINATED' || live?.status === 'STOPPED') {
       await instanceStore.markStopped(instance.id, { stoppedAt: now });
-      await stopComputeClock(instance.deploymentId, now);
+      await computeClock.stop(instance.deploymentId, now);
       summary.stopped += 1;
       return;
     }
@@ -437,7 +372,7 @@ const reconcileOne = async (instance, { gcp, now }, summary) => {
   const at = verdict.at || now;
   if (instance.phase === 'stopping') {
     await instanceStore.markStopped(instance.id, { stoppedAt: at });
-    await stopComputeClock(instance.deploymentId, at);
+    await computeClock.stop(instance.deploymentId, at);
     summary.stopped += 1;
     return;
   }
@@ -653,6 +588,79 @@ const sweepOrphans = async ({ gcp, now }, summary) => {
  * Returns a summary rather than logging only, so the job registry's run history
  * and a manual "run now" from the admin center both show what happened.
  */
+/**
+ * Retry the orders waiting for a Google region to exist.
+ *
+ * Mirrors the AWS sweep and exists for the same reason: a region-held order
+ * has no `DeploymentInstance` row — the driver checks the region BEFORE
+ * claiming one — so nothing else in the platform would ever pick it up. The
+ * promise in the customer's own message ("it will start on its own") is kept
+ * here or nowhere.
+ */
+const retryRegionHeld = async ({ now = new Date() }, summary) => {
+  const held = await prisma.deployment.findMany({
+    where: {
+      holdKind: 'region',
+      cloudProvider: 'gcp',
+      status: { in: ['pending_review', 'approved', 'provisioning'] },
+    },
+    orderBy: { heldAt: 'asc' },
+    take: 25,
+    select: { id: true, region: true, deploymentName: true, heldAt: true },
+  });
+
+  summary.regionHeld = held.length;
+  if (!held.length) return;
+
+  const gcpClient = require('../services/gcp/gcpClient');
+  const gcpRegionMap = require('../services/gcp/gcpRegionMap');
+  const autoProvision = require('../services/gcp/autoProvisionService');
+  const deploymentService = require('../services/deployment/deploymentService');
+
+  for (const row of held) {
+    // The deployment carries the PLATFORM region the customer chose; Google
+    // is asked in its own names.
+    const resolved = gcpRegionMap.resolveRegion(row.region);
+    if (!resolved.ok) {
+      console.error(`[GCP] ${row.id} is held for region "${row.region}", which maps nowhere.`);
+      continue;
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const ready = await gcpClient.regionReady(resolved.gcpRegion).catch(() => ({ ok: false }));
+    // Still nothing there. The hold stands and the customer's message already
+    // says why; retrying would only cost a round trip.
+    if (!ready.ok) continue;
+
+    try {
+      /*
+       * Loaded through the service rather than used as the bare row: the hold
+       * is cleared and the status moved by code that expects the wrapped
+       * document, with its `save()` and its transition rules.
+       */
+      // eslint-disable-next-line no-await-in-loop
+      const deployment = await deploymentService.findById(row.id);
+      if (!deployment) continue;
+
+      // eslint-disable-next-line no-await-in-loop
+      const result = await autoProvision.onHoldRetry(deployment);
+
+      if (result?.provisioned) {
+        summary.regionReleased = (summary.regionReleased || 0) + 1;
+        const waited = row.heldAt
+          ? Math.round((now.getTime() - new Date(row.heldAt).getTime()) / 60000)
+          : null;
+        console.log(
+          `[GCP] "${row.deploymentName}" started in ${row.region} after waiting for the region`
+          + `${waited !== null ? ` (${waited} min)` : ''}`
+        );
+      }
+    } catch (e) {
+      console.error(`[GCP] Could not retry ${row.id} after ${row.region} was built:`, e.message);
+    }
+  }
+};
+
 const run = async () => {
   const summary = {
     checked: 0,
@@ -698,6 +706,25 @@ const run = async () => {
     }
   }
 
+  /*
+   * Did a region get built since the last pass, and can anything waiting on
+   * it start now?
+   *
+   * Asked every minute because this is the promise made to a customer whose
+   * order is waiting on a new region: it starts on its own. Google's answer
+   * comes from Google — whether the regional subnet exists — rather than from
+   * anything an apply reported, because that is what a launch actually needs.
+   */
+  const promoted = await regionDemand.sync({ settings, cloud: 'gcp' }).catch((e) => {
+    console.error('[GCP] Region sync failed:', e.message);
+    return { changes: [] };
+  });
+  summary.regionsBuilt = (promoted.changes || []).filter((c) => c.to === 'built').length;
+
+  await retryRegionHeld({ now }, summary).catch((e) => {
+    console.error('[GCP] Region-held retry failed:', e.message);
+  });
+
   await alertStale({ now }, summary).catch((err) => {
     console.error('[GCP] Stale check failed:', err.message);
   });
@@ -720,7 +747,4 @@ module.exports = {
   readOperation,
   dryRunReady,
   isDryRunOperation,
-  // Exported for the admin UI's manual actions.
-  startComputeClock,
-  stopComputeClock,
 };

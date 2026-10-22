@@ -30,6 +30,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { TILE, STATUS_COLORS, muted, subtle, hairline } from '../../theme/colors';
 import { PERMISSIONS } from '../../utils/permissions';
 import { formatDateTime, timeAgo, formatIPAddress } from '../../utils/helpers';
+import { RATE_DECIMALS } from '../../utils/money';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -728,7 +729,7 @@ const CustomerDetailPage = () => {
                 <Statistic title="Balance" value={wallet.wallet.balance} precision={2} prefix={wallet.wallet.currency} valueStyle={{ color: success }} />
               </Col>
               <Col xs={24} sm={8}>
-                <Statistic title="Burn rate" value={wallet.wallet.burnRatePerHour} precision={2} suffix="/hr" />
+                <Statistic title="Burn rate" value={wallet.wallet.burnRatePerHour} precision={RATE_DECIMALS} suffix="/hr" />
               </Col>
               <Col xs={24} sm={8}>
                 <Statistic

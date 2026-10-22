@@ -270,12 +270,110 @@ const ratesFromSkus = (skus, { region, machineType } = {}) => {
   return { rates, matched, notes };
 };
 
+/**
+ * What a region costs on Google before a customer machine runs in it.
+ *
+ * ── Why Google's answer is so much smaller than AWS's ──
+ *
+ * Google bills Cloud NAT by the VM attached to it, not by the gateway. So a
+ * region that nobody is using costs almost nothing: only the NAT's own
+ * external address stands, and the rest arrives with each machine.
+ *
+ * That is the opposite of AWS, where a gateway is charged per availability
+ * zone whether anything uses it or not. The two numbers this returns are kept
+ * apart for exactly that reason — see `services/cloud/regionCost.js`.
+ *
+ * ── Why it refuses rather than guesses ──
+ *
+ * Google's SKU descriptions for this are not as predictable as the machine
+ * ones, and a pattern that matched nothing would quietly return zero — which
+ * reads as "this region is free". So an unmatched lookup comes back `ok:false`
+ * with a reason, and the operator records the figure by hand instead.
+ *
+ * @param {Array} skus    the SKU list `gcpPricing` already downloads
+ * @param {object} opts
+ * @param {string} opts.region  a GCP region, e.g. "europe-west4"
+ */
+const regionFixedCostFromSkus = (skus, { region } = {}) => {
+  const notes = [];
+  // The NAT's own address: standing, there with no machines.
+  const standing = [];
+  // The part billed per VM attached to the NAT.
+  const perMachine = [];
+
+  for (const sku of Array.isArray(skus) ? skus : []) {
+    const category = sku?.category || {};
+    if (category.usageType !== 'OnDemand') continue;
+
+    const regions = Array.isArray(sku.serviceRegions) ? sku.serviceRegions : [];
+    if (region && regions.length && !regions.includes(region) && !regions.includes('global')) continue;
+
+    const description = String(sku.description || '');
+    if (!/NAT/i.test(description)) continue;
+
+    const price = firstTierPrice(sku);
+    if (price === null) continue;
+
+    /*
+     * Data processing is per GiB and scales with traffic nobody can predict
+     * per machine. Taking it would add a per-GB figure to an hourly cost.
+     */
+    if (/data processed|per GiB|per GB/i.test(description)) continue;
+
+    if (/IP address|external IP/i.test(description)) {
+      standing.push({ description, price });
+      continue;
+    }
+    if (/VM|instance/i.test(description)) {
+      perMachine.push({ description, price });
+      continue;
+    }
+
+    // "NAT Gateway: Uptime charge" and similar — a standing hourly charge.
+    if (/uptime|gateway/i.test(description)) standing.push({ description, price });
+  }
+
+  if (!standing.length && !perMachine.length) {
+    return {
+      ok: false,
+      fixedCostPerHour: null,
+      perMachineCostPerHour: null,
+      notes,
+      reason: `Google published no Cloud NAT price this parser recognised for ${region || 'that region'}. `
+        + 'Record the region cost by hand under Cloud → Overview instead.',
+    };
+  }
+
+  /*
+   * Highest on ambiguity, the same rule the machine parser uses: a figure that
+   * is too high loses a sale, one that is too low loses money on every hour
+   * the region stays open.
+   */
+  const highest = (list) => (list.length
+    ? list.sort((a, b) => b.price - a.price)[0].price
+    : 0);
+
+  if (standing.length > 1) notes.push(`${standing.length} standing NAT prices matched; took the highest.`);
+  if (perMachine.length > 1) notes.push(`${perMachine.length} per-VM NAT prices matched; took the highest.`);
+  if (!standing.length) notes.push('No standing NAT charge matched; only the per-VM part was found.');
+  if (!perMachine.length) notes.push('No per-VM NAT charge matched; only the standing part was found.');
+
+  return {
+    ok: true,
+    fixedCostPerHour: Number(highest(standing).toFixed(6)),
+    perMachineCostPerHour: Number(highest(perMachine).toFixed(6)),
+    notes,
+    reason: null,
+  };
+};
+
 module.exports = {
   priceOf,
   firstTierPrice,
   familyOf,
   describesFamily,
   ratesFromSkus,
+  regionFixedCostFromSkus,
   GPU_ALIASES,
   DISK_ALIASES,
 };

@@ -39,7 +39,7 @@ const looksInternal = (message = '') => /\n/.test(message)
  * @param {string} [opts.log]         context prefix for the server-side log
  */
 const failure = (res, err, fallback, opts = {}) => {
-  // eslint-disable-next-line no-console
+   
   console.error(`${opts.log || 'Error'}:`, err);
 
   if (isClientError(err)) {

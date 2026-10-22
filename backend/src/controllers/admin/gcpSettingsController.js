@@ -61,10 +61,44 @@ const updateGcp = async (req, res) => {
 
     const {
       enabled, projectId, serviceAccountKey, customerServiceAccount, network, environment,
+      billingAccountId,
       dryRun, dryRunRunningAfterSeconds,
       maxConcurrentInstancesPerTeam, maxConcurrentInstancesPlatform,
       enforceMarginGuard, requestTimeoutSeconds, machineCostPerHour,
     } = req.body;
+
+    /*
+     * ── A field this does not know about is an error, not a no-op ──
+     *
+     * Everything below reads named fields and ignores the rest, so a request
+     * carrying `networkName` instead of `network` was answered `200 OK` and
+     * changed nothing. The caller had every reason to believe it had worked.
+     *
+     * That is not hypothetical: it cost an hour on this project. The network
+     * name was wrong, the correction was sent to the wrong field name, the
+     * API said OK, and the platform went on looking for a subnet that could
+     * never exist — while everything about the response said the fix had
+     * landed.
+     *
+     * Silence on an unrecognised field is the same failure as silence on a
+     * failed write. Better to refuse and name what was not understood.
+     */
+    const KNOWN = new Set([
+      'enabled', 'projectId', 'serviceAccountKey', 'customerServiceAccount', 'network',
+      'environment', 'billingAccountId', 'dryRun', 'dryRunRunningAfterSeconds',
+      'maxConcurrentInstancesPerTeam', 'maxConcurrentInstancesPlatform',
+      'enforceMarginGuard', 'requestTimeoutSeconds', 'machineCostPerHour',
+    ]);
+    const unknown = Object.keys(req.body || {}).filter((k) => !KNOWN.has(k));
+
+    if (unknown.length) {
+      return res.status(400).json({
+        success: false,
+        message: `This setting does not exist: ${unknown.join(', ')}. `
+          + `Nothing was saved. Known fields: ${[...KNOWN].join(', ')}.`,
+        unknownFields: unknown,
+      });
+    }
 
     const settings = await adminSettingsService.getSettings();
     if (!settings.gcpSettings) settings.gcpSettings = {};
@@ -74,6 +108,19 @@ const updateGcp = async (req, res) => {
     if (customerServiceAccount !== undefined) gcp.customerServiceAccount = String(customerServiceAccount).trim();
     if (network !== undefined) gcp.network = String(network).trim();
     if (environment !== undefined) gcp.environment = String(environment).trim();
+
+    /*
+     * The billing account, which decides WHOSE prices are read.
+     *
+     * The admin screen has had this field all along and the form sent it —
+     * but nothing here ever stored it, so it silently stayed empty and every
+     * price came from Google's public list rather than this account's own
+     * contract rate. On a platform whose margin is the difference between
+     * those two numbers, that is money.
+     */
+    if (billingAccountId !== undefined) {
+      gcp.billingAccountId = String(billingAccountId).trim();
+    }
     if (enabled !== undefined) gcp.enabled = !!enabled;
     if (dryRun !== undefined) gcp.dryRun = !!dryRun;
     if (enforceMarginGuard !== undefined) gcp.enforceMarginGuard = !!enforceMarginGuard;

@@ -12,12 +12,12 @@
 
 locals {
   env        = "staging"
-  project_id = "REPLACE-ME-aiocean-staging"
+  project_id = "ai-ocean-512104"
 
   # Created once by gcloud before the first apply — see SETUP.md step 3.5.
-  state_bucket = "REPLACE-ME-aiocean-staging-tfstate"
+  state_bucket = "staging-ai-ocean-512104-tfstate"
 
-  default_region = "europe-west4"
+  default_region = "us-east4"
 
   # The platform's region names mapped to real GCP regions. The backend holds
   # the same mapping in code (backend/src/services/gcp/gcpRegionMap.js); these
@@ -33,7 +33,7 @@ locals {
   }
 
   # The role-less account every customer VM runs as. Created in SETUP.md 5.1.
-  customer_service_account = "customer-vm@REPLACE-ME-aiocean-staging.iam.gserviceaccount.com"
+  customer_service_account = "customer-vm@ai-ocean-512104.iam.gserviceaccount.com"
 
   # Raasta A only. Leave as "" if there is no GCP organization — the
   # org-firewall-policy unit then does nothing, and isolation rests on the

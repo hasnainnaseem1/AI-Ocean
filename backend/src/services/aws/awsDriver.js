@@ -105,12 +105,39 @@ const provision = async (deployment) => {
    * the second one can place a machine. Reaching the launch instead would
    * leave a failed row behind and report it as an unrecognised AWS error —
    * when it is our own configuration, and the fix is a Terragrunt apply.
+   *
+   * ── Why this is NOT permanent ──
+   *
+   * It used to be, and that was wrong in a way that cost orders. "Not built
+   * here yet" is the expected state of every region on the day its first
+   * customer arrives: the platform costs and sells a region before it builds
+   * it, deliberately, so the region's standing cost is in the price from the
+   * start. Marking it permanent moved the deployment to `failed` — a dead end
+   * for an order that only needed to wait — and put our own message, naming
+   * an `infra/aws/live/...` path, in front of the customer.
+   *
+   * So it is transient and carries `needsRegion`. The caller holds the order,
+   * tells the customer a region is being set up, and asks for the build. The
+   * reconciler retries, and the moment the ids land in settings the same code
+   * path goes through with nothing else changed.
    */
   const infra = await awsClient.infraFor(region.awsRegion).catch((err) => ({
-    ok: false, code: err.code || 'REGION_NOT_CONFIGURED', message: err.message,
+    ok: false,
+    code: err.code || 'REGION_NOT_CONFIGURED',
+    message: err.message,
+    missing: err.missing || [],
   }));
   if (!infra.ok) {
-    return outcome(false, true, infra.message, { code: infra.code, permanent: true });
+    const needsRegion = infra.code === 'REGION_NOT_CONFIGURED';
+    return outcome(false, true, infra.message, {
+      code: infra.code,
+      permanent: !needsRegion,
+      needsRegion,
+      awsRegion: region.awsRegion,
+      // What is still missing, so an admin screen can say so without
+      // re-deriving it and the builder knows there is work to do.
+      missing: infra.missing || [],
+    });
   }
 
   const config = await awsClient.config().catch(() => ({}));

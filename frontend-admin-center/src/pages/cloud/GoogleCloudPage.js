@@ -3,13 +3,14 @@ import { Tabs, Space, Tag, Badge } from 'antd';
 import {
   ApiOutlined, ThunderboltOutlined, DollarOutlined, DisconnectOutlined,
 } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import GcpConnectionTab from './GcpConnectionTab';
 import CloudProvisioningTab from './CloudProvisioningTab';
 import CloudPricingTab from './CloudPricingTab';
 import CloudOrphansPanel from './CloudOrphansPanel';
 import settingsApi from '../../api/settingsApi';
+import CloudSetupSteps from './CloudSetupSteps';
 import deploymentsApi from '../../api/deploymentsApi';
 
 /**
@@ -29,17 +30,21 @@ import deploymentsApi from '../../api/deploymentsApi';
  */
 const GoogleCloudPage = () => {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
 
   const loadSummary = useCallback(async () => {
-    const [settings, orphans] = await Promise.all([
+    const [settings, orphans, costs] = await Promise.all([
       settingsApi.getSettings().catch(() => null),
       // This cloud's own, so the badge is not moved by an AWS problem.
       deploymentsApi.getOrphans({ cloud: 'gcp', limit: 1 }).catch(() => null),
+      // For the setup steps: whether this cloud's regions have been costed.
+      settingsApi.getRegionCosts().catch(() => null),
     ]);
     setSummary({
       gcp: settings?.settings?.gcpSettings || {},
       unresolvedOrphans: orphans?.unresolved || 0,
+      regionCosts: (costs?.regions || []).filter((r) => r.cloud === 'gcp'),
     });
   }, []);
 
@@ -96,6 +101,19 @@ const GoogleCloudPage = () => {
         breadcrumbs={[{ label: 'Home', path: '/' }, { label: 'Cloud', path: '/cloud' }, { label: 'Google Cloud' }]}
         extra={<Tag color={state.color}>{state.text}</Tag>}
       />
+      {/*
+        * What state this cloud is in and what to do next, above the tabs that
+        * hold the detail. Without it an operator could fill in every field and
+        * still have nothing happen, with no way to find out why.
+        */}
+      <CloudSetupSteps
+        cloud="gcp"
+        label="Google Cloud"
+        settings={gcp}
+        regionCosts={summary?.regionCosts || []}
+        onGoToTab={(tab) => (tab === 'overview' ? navigate('/cloud') : setParams({ tab }))}
+      />
+
       <Tabs
         activeKey={params.get('tab') || 'connection'}
         // Kept in the URL so an admin can link a colleague straight to the tab

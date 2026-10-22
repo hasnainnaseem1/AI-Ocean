@@ -86,6 +86,98 @@ router.get('/', checkPermission('models.view'), async (req, res) => {
 });
 
 /**
+ * @route GET /api/v1/admin/tiers/:id/prices
+ * @desc  What this tier costs, and sells for, in every place it is sold
+ *
+ * One row per (cloud × region). The screen that reads this replaced a panel
+ * that showed a single figure for `regions[0]` and asked Google for it no
+ * matter which cloud the tier would actually be built on — so the cost an
+ * admin saw for an AWS tier was not its cost.
+ *
+ * Returns every place, including the ones that failed: a screen showing only
+ * the cells that worked would hide exactly the rows worth acting on.
+ */
+router.get('/:id/prices', checkPermission('models.view'), async (req, res) => {
+  try {
+    const tierPriceService = require('../../../services/cloud/tierPriceService');
+    const rows = await tierPriceService.matrixFor(req.params.id);
+
+    res.json({
+      success: true,
+      prices: rows,
+      // The headline an operator needs before reading a table of six rows.
+      summary: {
+        places: rows.length,
+        sellable: rows.filter((r) => r.status === 'sellable').length,
+        problems: rows.filter((r) => r.status !== 'sellable').length,
+        cheapest: rows.filter((r) => r.status === 'sellable')
+          .reduce((lo, r) => (lo === null || r.sellPricePerHour < lo ? r.sellPricePerHour : lo), null),
+        dearest: rows.filter((r) => r.status === 'sellable')
+          .reduce((hi, r) => (hi === null || r.sellPricePerHour > hi ? r.sellPricePerHour : hi), null),
+      },
+    });
+  } catch (error) {
+    return failure(res, error, 'Error reading this tier\'s prices');
+  }
+});
+
+/**
+ * @route POST /api/v1/admin/tiers/:id/prices/refresh
+ * @desc  Re-read what this tier costs now, rather than waiting for the hour
+ */
+router.post('/:id/prices/refresh', checkPermission('models.edit'), async (req, res) => {
+  try {
+    const tierPriceService = require('../../../services/cloud/tierPriceService');
+    const tier = await prisma.tier.findUnique({ where: { id: req.params.id } });
+    if (!tier) return res.status(404).json({ success: false, message: 'Tier not found' });
+
+    await tierPriceService.refreshTier(tier);
+    const rows = await tierPriceService.matrixFor(tier.id);
+
+    res.json({ success: true, message: 'Prices refreshed', prices: rows });
+  } catch (error) {
+    return failure(res, error, 'Error refreshing this tier\'s prices');
+  }
+});
+
+/**
+ * @route PUT /api/v1/admin/tiers/:id/prices
+ * @desc  Set one place's price by hand, or hand it back to the refresh
+ *
+ * Sending `sellPricePerHour: null` clears the override, and the next pass
+ * prices that cell from its own floor again. A price set here is still checked
+ * against the floor — overriding is not a way to sell below cost quietly.
+ */
+router.put('/:id/prices', checkPermission('models.edit'), async (req, res) => {
+  try {
+    const tierPriceService = require('../../../services/cloud/tierPriceService');
+    const cloudRouter = require('../../../services/cloud/cloudRouter');
+    const { cloud, region, sellPricePerHour } = req.body || {};
+
+    if (!cloudRouter.isCloud(String(cloud || ''))) {
+      return res.status(400).json({ success: false, message: `"${cloud}" is not a cloud this platform builds on.` });
+    }
+
+    const existing = await prisma.tierPrice.findUnique({
+      where: { tierId_cloud_region: { tierId: req.params.id, cloud, region: String(region || '') } },
+    });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: `This tier has no price for ${cloud} in ${region}. It may not be sold there.`,
+      });
+    }
+
+    await tierPriceService.setCellPrice(req.params.id, cloud, String(region), sellPricePerHour);
+    const rows = await tierPriceService.matrixFor(req.params.id);
+
+    res.json({ success: true, message: 'Price saved', prices: rows });
+  } catch (error) {
+    return failure(res, error, 'Error saving this price');
+  }
+});
+
+/**
  * @route POST /api/v1/admin/tiers/price-preview
  *
  * What a set of component picks would cost, without saving anything. The tier
@@ -145,8 +237,51 @@ router.get('/:id', checkPermission('models.view'), async (req, res) => {
 });
 
 // @route   POST /api/v1/admin/tiers
+/**
+ * Refuse a tier sold in a region whose cost we do not know.
+ *
+ * -- Why this is a refusal and not a warning --
+ *
+ * A region's standing cost -- the NAT gateways that are charged whether anyone
+ * uses them or not -- has to reach the price of everything sold there. Without
+ * it a tier is priced on the machine alone, which on a fresh AWS region is
+ * roughly half what it should be, and the resulting number looks exactly like
+ * a correct one.
+ *
+ * Caught here, while the operator is on the screen that can fix it, rather
+ * than at order time when the person hitting the problem cannot.
+ *
+ * -- What this does NOT check --
+ *
+ * Whether the region's network has been built. That is a different fact with
+ * different timing: a cloud publishes what a region costs long before we build
+ * anything in it, and a customer may well be the first to deploy somewhere.
+ * Requiring the infrastructure here would make that impossible.
+ */
+const regionsMustBeCosted = async (req, res, regions) => {
+  const regionCostService = require('../../../services/cloud/regionCostService');
+  const verdict = await regionCostService.ensureCosted(regions);
+  if (verdict.ok) return true;
+
+  const named = verdict.missing.map((m) => (m.cloud === 'aws' ? 'AWS' : 'Google Cloud') + ' / ' + m.region);
+  res.status(400).json({
+    success: false,
+    code: 'REGION_NOT_COSTED',
+    message:
+      'This tier cannot be sold in ' + named.join(', ') + ' yet -- what '
+      + (named.length === 1 ? 'that region costs' : 'those regions cost')
+      + ' to keep open has not been recorded, and without it the tier would be priced short by it. '
+      + 'Record it under Cloud -> Overview -> "What each region costs to keep open", or connect the '
+      + 'cloud so the figure can be read automatically.',
+    missing: verdict.missing,
+  });
+  return false;
+};
+
 router.post('/', checkPermission('models.create'), async (req, res) => {
   try {
+    if (!await regionsMustBeCosted(req, res, req.body?.regions)) return;
+
     const { tier, dropped } = await catalogService.createTier(req.body, req.user.id);
     applyImmediately();
 
@@ -178,6 +313,14 @@ router.put('/:id', checkPermission('models.edit'), async (req, res) => {
       include: catalogService.TIER_INCLUDE,
     });
     if (!existing) return res.status(404).json({ success: false, message: 'Tier not found' });
+
+    /*
+     * The regions the tier will END UP with, not merely the ones sent: an edit
+     * that does not mention regions keeps the ones it has, and must not be
+     * refused over a region the operator is not touching.
+     */
+    if (req.body?.regions !== undefined
+      && !await regionsMustBeCosted(req, res, req.body.regions)) return;
 
     const {
       tier, dropped, priceChanged, oldPrice, oldStopped,

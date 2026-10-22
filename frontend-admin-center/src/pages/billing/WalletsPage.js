@@ -13,6 +13,7 @@ import { StatRow, StatCard } from '../../components/StatRow';
 import { usePermission } from '../../hooks/usePermission';
 import walletsApi from '../../api/walletsApi';
 import { PERMISSIONS } from '../../utils/permissions';
+import { RATE_DECIMALS } from '../../utils/money';
 import { useTheme } from '../../contexts/ThemeContext';
 import { STATUS_COLORS } from '../../theme/colors';
 
@@ -260,7 +261,7 @@ const WalletsPage = () => {
               </Col>
               <Col span={8}>
                 <Card size="small">
-                  <Statistic title="Burn rate" value={detail.wallet.burnRatePerHour} precision={2} suffix="/hr" />
+                  <Statistic title="Burn rate" value={detail.wallet.burnRatePerHour} precision={RATE_DECIMALS} suffix="/hr" />
                 </Card>
               </Col>
               <Col span={8}>

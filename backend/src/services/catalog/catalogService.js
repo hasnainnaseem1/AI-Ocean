@@ -133,6 +133,11 @@ const toTierDoc = (row) => ({
   },
   pricePerHour: num(row.pricePerHour),
   stoppedPricePerHour: num(row.stoppedPricePerHour),
+  // Null means "use the platform default", so it is passed through as null
+  // rather than coerced to a number the operator never chose.
+  targetMarginPercent: row.targetMarginPercent === null || row.targetMarginPercent === undefined
+    ? null
+    : num(row.targetMarginPercent),
   currency: row.currency,
   gpuModel: row.gpuModel,
   gpuCount: row.gpuCount,
@@ -170,6 +175,11 @@ const toAIModelDoc = (row) => ({
   parameterSize: row.parameterSize,
   contextLength: row.contextLength,
   minVramGb: row.minVramGb,
+  // What this model needs to LOAD, as opposed to what a workload implies.
+  // Zero means "not stated" — see the schema.
+  minGpuCount: row.minGpuCount,
+  minVcpu: row.minVcpu,
+  minRamGb: row.minRamGb,
   supportedTiers: (row.supportedTiers || []).map((st) => ({
     tierId: st.tier?.id || null,
     tierName: st.tierName,
@@ -404,6 +414,34 @@ const componentCreateInputs = (lines) => lines.map((l, i) => ({
   specs: l.specs,
 }));
 
+/**
+ * What a tier should earn over its cost, from a request body.
+ *
+ * Undefined means "not sent, leave it alone"; null or an empty string mean
+ * "use the platform default". Both have to round-trip, because they are
+ * different intentions and only one of them is a change.
+ */
+/**
+ * Re-price a tier everywhere it is sold, after it has been saved.
+ *
+ * Fire-and-forget on purpose. The matrix is derived from the tier, so it can
+ * always be rebuilt — and a save that failed because a cloud's price API was
+ * slow would lose the operator's actual edit over a figure the hourly refresh
+ * would have corrected anyway.
+ */
+const reprice = (tierRow) => {
+  Promise.resolve()
+    .then(() => require('../cloud/tierPriceService').refreshTier(tierRow))
+    .catch((err) => console.error(`[Catalog] Could not re-price ${tierRow?.name}:`, err.message));
+};
+
+const readTargetMargin = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, 1000) : null;
+};
+
 const createTier = async (body, actorId) => {
   const categoryId = body.categoryId ? await resolveTierCategoryId(body.categoryId) : null;
 
@@ -441,6 +479,7 @@ const createTier = async (body, actorId) => {
       pricingComponentStoppedSubtotalPerHour: rollup.componentStoppedSubtotalPerHour,
       pricePerHour,
       stoppedPricePerHour,
+      targetMarginPercent: readTargetMargin(body.targetMarginPercent) ?? null,
       currency: (body.currency || 'USD').toUpperCase(),
       gpuModel: rollup.specs.gpuModel ?? body.gpuModel ?? '',
       gpuCount: rollup.specs.gpuCount ?? body.gpuCount ?? 0,
@@ -463,6 +502,8 @@ const createTier = async (body, actorId) => {
     },
     include: TIER_INCLUDE,
   });
+
+  reprice(created);
 
   return { tier: toTierJSON(created), dropped };
 };
@@ -527,6 +568,11 @@ const updateTier = async (tier, body, actorId) => {
     pricingComponentStoppedSubtotalPerHour: rollup.componentStoppedSubtotalPerHour,
     pricePerHour,
     stoppedPricePerHour,
+    // Absent from the body means "leave it alone"; null means "use the
+    // platform default". Collapsing the two would make clearing it impossible.
+    ...(readTargetMargin(body.targetMarginPercent) === undefined
+      ? {}
+      : { targetMarginPercent: readTargetMargin(body.targetMarginPercent) }),
     currency: body.currency ? body.currency.toUpperCase() : tier.currency,
     gpuModel: rollup.specs.gpuModel ?? body.gpuModel ?? tier.gpuModel,
     gpuCount: rollup.specs.gpuCount ?? body.gpuCount ?? tier.gpuCount,
@@ -575,6 +621,8 @@ const updateTier = async (tier, body, actorId) => {
   }
 
   const priceChanged = num(updated.pricePerHour) !== oldPrice || num(updated.stoppedPricePerHour) !== oldStopped;
+
+  reprice(updated);
 
   return {
     tier: toTierJSON(updated), dropped, priceChanged, oldPrice, oldStopped,
@@ -799,6 +847,9 @@ const createAIModel = async (body, actorId) => {
       parameterSize: body.parameterSize || '',
       contextLength: body.contextLength || 0,
       minVramGb: body.minVramGb || 0,
+      minGpuCount: body.minGpuCount || 0,
+      minVcpu: body.minVcpu || 0,
+      minRamGb: body.minRamGb || 0,
       strengths: body.strengths || [],
       limitations: body.limitations || [],
       status: body.status || 'available',
@@ -839,6 +890,9 @@ const updateAIModel = async (model, body, actorId) => {
     parameterSize: body.parameterSize ?? model.parameterSize,
     contextLength: body.contextLength ?? model.contextLength,
     minVramGb: body.minVramGb ?? model.minVramGb,
+    minGpuCount: body.minGpuCount ?? model.minGpuCount,
+    minVcpu: body.minVcpu ?? model.minVcpu,
+    minRamGb: body.minRamGb ?? model.minRamGb,
     strengths: body.strengths ?? model.strengths,
     limitations: body.limitations ?? model.limitations,
     status: body.status ?? model.status,
@@ -1005,6 +1059,9 @@ const listModelsByTier = async (tierIds = null) => {
           family: true,
           status: true,
           minVramGb: true,
+          minGpuCount: true,
+          minVcpu: true,
+          minRamGb: true,
           shortDescription: true,
         },
       },
@@ -1021,6 +1078,9 @@ const listModelsByTier = async (tierIds = null) => {
       family: row.aiModel.family,
       status: row.aiModel.status,
       minVramGb: num(row.aiModel.minVramGb),
+      minGpuCount: num(row.aiModel.minGpuCount),
+      minVcpu: num(row.aiModel.minVcpu),
+      minRamGb: num(row.aiModel.minRamGb),
       shortDescription: row.aiModel.shortDescription,
       recommended: row.recommended,
       priceMultiplier: row.priceMultiplier == null ? 1 : num(row.priceMultiplier),

@@ -122,27 +122,105 @@ lock_table   = "aiocean-staging-tflock"     # step 3
 
 Baqi kuch badalne ki zaroorat nahi.
 
+Is file me sirf wo cheezein hain jo **poore account** ki hain. Jo cheez ek
+region ki hai — VPC ka address range, kaun si availability zones — wo us
+region ke apne `region.hcl` me hai:
+
+```
+live/staging/eu-west-1/region.hcl     10.30.0.0/16
+live/staging/us-east-1/region.hcl     10.31.0.0/16
+live/staging/ap-south-1/region.hcl    10.32.0.0/16
+```
+
+Har region ka apna /16, aapas me na takrane wala, taake kal ye region aapas me
+peer kiye ja saken bina renumber kiye — aur renumber ka matlab us subnet ki
+har machine dobara banani.
+
+**Naya region kholna** = ek naya folder, us me `region.hcl` (region ka naam,
+uski do zones, aur ek khaali /16), aur `network/security/nat` ke teen
+`terragrunt.hcl` kisi maujooda region se copy. Backend me bhi wo region
+`awsRegionMap.js` me hona chahiye — ek test dono ko match karwata hai.
+
 ---
 
 ## 5 · Infra bana dein
 
+### Pehle: IAM, ek hi baar
+
+IAM AWS par **global** hai — role aur instance profile poore account ke liye ek
+hi baar bante hain. Teen region me banane ki koshish karein to doosri dafa
+`EntityAlreadyExists` milega.
+
 ```bash
-cd infra/aws/live/staging
-
-# Pehle network — baqi sab isi par tika hai
-cd network  && terragrunt apply && cd ..
-
-# Phir isolation. Yahi asal cheez hai.
-cd security && terragrunt apply && cd ..
-
-# Internet tak raasta
-cd nat      && terragrunt apply && cd ..
-
-# Machine kis haisiyat se chalegi
-cd iam      && terragrunt apply && cd ..
+cd infra/aws/live/staging/iam && terragrunt apply && cd ..
 ```
 
-Ya ek saath: `terragrunt run-all apply` — tarteeb khud samajh leta hai.
+### Phir: har region alag se
+
+AWS par network **region ki hoti hai**. Ek VPC do region me nahi chalti —
+Google ke bar'aks, jahan ek network har region ko cover karta hai. Is liye
+har region ka apna poora stack hai:
+
+```
+live/staging/
+  iam/            ← ek hi baar, global
+  eu-west-1/      ← platform region: eu-central
+  us-east-1/      ← platform region: us-east
+  ap-south-1/     ← platform region: ap-south
+```
+
+Jo region bechna hai, sirf usi me chalayein:
+
+```bash
+cd infra/aws/live/staging/eu-west-1
+terragrunt run-all apply        # network → security → nat, tarteeb khud samajh leta hai
+```
+
+Ya haath se, taake har qadam dikhe:
+
+```bash
+cd network  && terragrunt apply && cd ..   # Pehle network — baqi sab isi par tika hai
+cd security && terragrunt apply && cd ..   # Phir isolation. Yahi asal cheez hai.
+cd nat      && terragrunt apply && cd ..   # Internet tak raasta
+```
+
+> **Har region ka apna kharcha hai.** NAT gateway har availability zone par
+> alag bill karta hai, chahe us region me ek machine ho ya zero — do zone ke
+> saath tقریban **$65/month**. Region kholne se pehle Admin → Cloud → Overview
+> par us ka kharcha darj karein, warna us region ki har tier us kharche jitni
+> kam price par bikegi.
+
+---
+
+## 5b · Ids admin center me daalein
+
+Ye wo qadam hai jo pehle likha hi nahi tha, aur jiske baghair machine banegi
+hi nahi.
+
+**Har region ke liye alag**, kyunki ye saari cheezein us region ki hain:
+
+```bash
+cd infra/aws/live/staging/eu-west-1
+
+cd network  && terragrunt output -raw vpc_id          && cd ..   # → VPC
+cd network  && terragrunt output private_subnet_ids   && cd ..   # → Customer subnets
+cd security && terragrunt output -raw security_group_id && cd .. # → Security group
+```
+
+Admin → Cloud → AWS → Connection par us region ke block me paste karein.
+Chauthi cheez, **machine image (AMI)**, Terraform nahi banata — wo aap AWS
+console se us region ka Ubuntu/Deep Learning AMI id uthate hain. **AMI bhi
+region ki hoti hai**: eu-west-1 ka id ap-south-1 me kuch bhi nahi.
+
+Aur ek dafa, global:
+
+```bash
+cd infra/aws/live/staging/iam
+terragrunt output -raw customer_instance_profile_name   # → Instance profile
+```
+
+Jab tak kisi region ka card **green** na ho, us region me machine nahi banegi
+— aur Connection page us par saaf likh deta hai ke kya kami hai.
 
 ---
 
@@ -165,6 +243,145 @@ Output me `AccessKeyId` aur `SecretAccessKey` aayenge.
 Ye chabi sirf machinein bana aur mita sakti hai. Network ko **chhu bhi nahi
 sakti** — policy me saaf `Deny` likha hai, taake ye chabi leak bhi ho jaye to
 isolation na tootay.
+
+---
+
+## 6b · Region build worker ki chabi — **alag rakhni hai**
+
+Agar aap chahte hain ke naya region **backend se khud ban jaye** (admin center
+me button dabate hi), to uske liye ek **doosri chabi** chahiye — aur uska alag
+rehna hi is poore design ki jaan hai.
+
+### Pehle ye samajh lein k masla kya hai
+
+Region banane ka matlab hai VPC, subnet, security group aur **network ACL**
+banana. AWS par wohi permission jo NACL ka rule **banati** hai, usi se wo rule
+**badla** bhi ja sakta hai — `CreateNetworkAclEntry` aur
+`ReplaceNetworkAclEntry` ko alag nahi kiya ja sakta, kyunki policy likhte waqt
+ACL maujood hi nahi hota.
+
+Yani ye chabi, chahe jitni tang kar lein, **isolation tor sakti hai**. Rule 100
+me sirf ek lafz `deny` se `allow` ho jaye aur us region ki har customer VM
+doosri har VM tak pohonch jati hai. Na koi machine banti hai, na bill badalta
+hai, na koi alarm bajta hai.
+
+Is liye is chabi ka **backend ke andar na hona** hi wo cheez hai jo aap ka rule
+bachati hai.
+
+### Teen shartein — teenon zaroori hain
+
+| # | Shart | Kyun |
+|---|---|---|
+| 1 | Chabi **sirf** build worker ke environment me ho | Backend process me aate hi, backend ka koi bhi bug firewall tak pohonch jata hai |
+| 2 | Worker **alag OS user** se chale | Ek hi user ho to backend uska environment parh sakta hai — tab alag karna sirf dikhawa hai |
+| 3 | Har apply ke baad isolation **verify** ho | Ye khud ba khud hota hai; dekhein neeche |
+
+### Chabi banayein
+
+```bash
+aws iam create-access-key --user-name aiocean-region-builder
+```
+
+> **Ye chabi admin center me paste NAHI karni.** Na `.env` me, na database me,
+> na kisi screen par. Sirf us process ke environment me jo worker chalata hai.
+>
+> **Mujhe bhi na bhejein.**
+
+### Worker ko alag user se chalayein
+
+**Linux:**
+```bash
+sudo useradd -r -s /bin/false aiocean-builder
+
+sudo tee /etc/systemd/system/aiocean-region-builder.service > /dev/null <<'EOF'
+[Unit]
+Description=AI-Ocean region build worker
+After=network.target
+
+[Service]
+User=aiocean-builder
+WorkingDirectory=/path/to/AI-Ocean/backend
+ExecStart=/usr/bin/node src/workers/regionBuilder.js
+# `always`, not `on-failure`: a clean exit is still an exit, and a worker that
+# is not running is a customer order that never starts. 5 second gap so a
+# misconfiguration does not spin.
+Restart=always
+RestartSec=5
+
+# Ye do sirf yahan. Backend ke .env me kabhi nahi.
+Environment=AIOCEAN_BUILD_AWS_ACCESS_KEY_ID=AKIA...
+Environment=AIOCEAN_BUILD_AWS_SECRET_ACCESS_KEY=...
+Environment=AIOCEAN_BUILD_ENV=staging
+Environment=AIOCEAN_BUILD_TOOL_DIR=/opt/tf
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo chmod 600 /etc/systemd/system/aiocean-region-builder.service
+sudo systemctl enable --now aiocean-region-builder
+```
+
+**Windows:** ek alag local user banayein, phir Task Scheduler me:
+
+1. **Create Task** (Basic nahi — poora wala)
+2. **General** → "Run whether user is logged on or not", aur us alag user ko chunein
+3. **Triggers** → New → **At startup** (taake reboot par bhi chale)
+4. **Actions** → `node` aur arguments `src/workers/regionBuilder.js`,
+   "Start in" me backend ka folder
+5. **Settings** → **"If the task fails, restart every: 1 minute"**, attempts 999
+   — yehi crash par wapas chalata hai
+6. **Settings** → "Stop the task if it runs longer than" ko **uncheck** karein
+   (ye hamesha chalne wala kaam hai, ek baar ka nahi)
+
+Environment variables us task par set karein, system-wide nahi — warna backend
+bhi unhe parh sakta hai, aur alag rakhne ka poora maqsad khatam.
+
+### Chala kar dekh lein (kuch banaye bagair)
+
+```bash
+node src/workers/regionBuilder.js --region ap-south-1 --dry-run
+```
+
+Ye sirf `terragrunt plan` chalata hai. Kuch nahi banta, koi charge nahi.
+
+### Jo khud ba khud hota hai
+
+Har apply ke **baad**, worker AWS se dobara poochhta hai: kya NACL ka deny rule
+abhi bhi apni jagah par hai? Ye sawaal **backend wali chabi se** poochha jata
+hai — us chabi se jo rules badal hi nahi sakti, is liye uska jawab zyada
+qabil-e-aitbaar hai.
+
+Agar jawab ghalat ho, to region **publish hi nahi hota**: koi customer machine
+wahan nahi banti aur admin ko fauran urgent notification jati hai.
+
+Iske ilawa har **30 minute** me yehi check poore platform par chalta hai — kyunki
+chabi aaj leak na ho, agle mahine ho sakti hai, aur us soorat me koi aur
+alamat zahir nahi hoti.
+
+### Region khud ba khud kab banta hai
+
+Worker chal raha ho to **customer ke order par hi** — kisi button ka intezar
+nahi. Lekin sirf us region me jahan:
+
+1. **Order asli ho** — paisa maujood ho. Jis account ka balance kam hai uska
+   order pehle hi ruk jata hai, to wo kabhi $65/mahina shuru nahi kar sakta.
+2. **Us region me koi tier bika hua ho** — yani admin ne pehle us region ki
+   cost darj ki (warna tier banta hi nahi) aur phir wahan machine bechne ka
+   faisla kia. **Yehi aap ki ijazat ka nishan hai** — koi teesra button nahi.
+
+Jis region me aap ne tier nahi banaya, wahan customer ja hi nahi sakta — to
+wo region kabhi khud nahi banega.
+
+### Agar aap worker nahi chalate
+
+Bilkul theek hai. Admin center ka button phir bhi kaam karta hai, bas wo aap ko
+**commands dikhata hai** jo aap khud apne credentials se chala lein.
+
+Ek farq: worker band ho to customer ko **koi waqt ka wada nahi kia jata** —
+kyunki us wade ko poora karne wala koi nahi. Usay saaf likha jata hai ke region
+taiyar kia ja raha hai, aur saath me wo region bhi dikhaya jata hai jahan
+machine **abhi** chal sakti hai.
 
 ---
 

@@ -58,15 +58,24 @@ const MAX_PAGES = 10;
 const cache = new Map();
 const cacheKey = (region, instanceType) => `${region}::${instanceType}`;
 
-/** One GetProducts call, paged. */
-const getProducts = async ({ filters, token, accessKeyId, secretAccessKey, timeoutMs }) => {
+/**
+ * One GetProducts call, paged.
+ *
+ * `serviceCode` defaults to EC2 because almost every call here is about a
+ * machine. The NAT gateway lives under `AmazonVPC` instead — a different
+ * service with its own attributes, which is why it cannot simply be another
+ * filter on the EC2 call.
+ */
+const getProducts = async ({
+  filters, token, accessKeyId, secretAccessKey, timeoutMs, serviceCode = 'AmazonEC2',
+}) => {
   const out = [];
   let nextToken;
   let pages = 0;
 
   do {
     const body = JSON.stringify({
-      ServiceCode: 'AmazonEC2',
+      ServiceCode: serviceCode,
       Filters: filters,
       MaxResults: 100,
       ...(nextToken ? { NextToken: nextToken } : {}),
@@ -234,6 +243,101 @@ const provider = {
        * there is no figure there either — which is the safe direction.
        */
       console.error('[CloudPricing] Could not read AWS prices:', err.message);
+      return unavailable(err.message);
+    }
+  },
+
+  /**
+   * What this region costs per hour before a single customer machine runs.
+   *
+   * ── Why AWS has this and Google barely does ──
+   *
+   * A NAT gateway is billed per availability zone whether anything uses it or
+   * not. This platform builds one per zone (see `infra/aws/modules/nat`), so a
+   * two-zone region stands at roughly $0.09 an hour — about $65 a month — from
+   * the moment it is opened.
+   *
+   * Nothing scales with machines here: the per-GB data-processing charge is
+   * real but unpredictable per machine, so it is deliberately not included
+   * rather than guessed at. `perMachineCostPerHour` comes back zero.
+   *
+   * @param {object} opts
+   * @param {string} opts.region   an AWS region, e.g. "eu-west-1"
+   * @param {number} opts.azCount  how many zones this platform built NAT in
+   */
+  async fetchRegionFixedCost({ region, azCount = 2, force = false }) {
+    const unavailable = (reason) => ({
+      ok: false,
+      fixedCostPerHour: null,
+      perMachineCostPerHour: null,
+      source: 'aws',
+      fetchedAt: null,
+      notes: [],
+      reason,
+    });
+
+    if (!region) return unavailable('A region is required.');
+
+    const zones = Math.max(1, Math.floor(Number(azCount)) || 1);
+    const key = `region-fixed::${region}`;
+
+    const hit = cache.get(key);
+    if (!force && hit && Date.now() - hit.at < CACHE_TTL_MS) {
+      return {
+        ok: true,
+        fixedCostPerHour: Number((hit.natHour * zones).toFixed(6)),
+        perMachineCostPerHour: 0,
+        source: 'aws',
+        fetchedAt: new Date(hit.at),
+        notes: [...hit.notes, `${zones} NAT gateway(s) at ${hit.natHour}/hr each.`],
+        cached: true,
+      };
+    }
+
+    try {
+      const adminSettingsService = require('../admin/adminSettingsService');
+      const cryptoHelper = require('../../utils/helpers/cryptoHelper');
+
+      const settings = await adminSettingsService.getSettings();
+      const aws = settings?.awsSettings || {};
+      if (!aws.enabled) return unavailable('AWS is switched off.');
+      if (!aws.accessKeyId || !aws.secretAccessKeyEncrypted) {
+        return unavailable('No AWS credential is stored, so prices cannot be read.');
+      }
+
+      const secret = cryptoHelper.decrypt(aws.secretAccessKeyEncrypted);
+      if (!secret) return unavailable('The stored AWS secret key could not be decrypted.');
+
+      const priceList = await getProducts({
+        accessKeyId: aws.accessKeyId,
+        secretAccessKey: secret,
+        timeoutMs: Math.max(5, Number(aws.requestTimeoutSeconds) || 30) * 1000,
+        // A different service from the machines — see `getProducts`.
+        serviceCode: 'AmazonVPC',
+        filters: [term('regionCode', region)],
+      });
+
+      const { natGatewayRateFrom } = require('./awsPriceParser');
+      const parsed = natGatewayRateFrom(priceList, { regionCode: region });
+      if (!parsed.ok) return unavailable(parsed.reason);
+
+      cache.set(key, { natHour: parsed.natGatewayHour, notes: parsed.notes, at: Date.now() });
+
+      return {
+        ok: true,
+        fixedCostPerHour: Number((parsed.natGatewayHour * zones).toFixed(6)),
+        // Nothing regional on AWS scales per machine, so this stays zero
+        // rather than being left undefined for a caller to misread.
+        perMachineCostPerHour: 0,
+        source: 'aws',
+        fetchedAt: new Date(),
+        notes: [...parsed.notes, `${zones} NAT gateway(s) at ${parsed.natGatewayHour}/hr each.`],
+        cached: false,
+      };
+    } catch (err) {
+      // Same rule as `fetchRates`: a pricing failure must never break
+      // provisioning. The caller keeps whatever figure it already had.
+      console.error('[CloudPricing] Could not read AWS region cost:', err.message);
       return unavailable(err.message);
     }
   },

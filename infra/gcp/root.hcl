@@ -67,26 +67,20 @@ generate "provider" {
   EOF
 }
 
-generate "versions" {
-  path      = "versions.tf"
-  if_exists = "overwrite_terragrunt"
-  contents  = <<-EOF
-    terraform {
-      required_version = ">= 1.5"
+/*
+ * ── There is deliberately no `generate "versions"` block here ──
+ *
+ * There used to be, and it meant this stack could never be applied. Each
+ * module ships its own `versions.tf` — which is where a module's provider
+ * requirements belong, so it stays valid whether it is called from here, from
+ * another stack, or from a bare `terraform apply`. Terragrunt's
+ * `if_exists = "overwrite_terragrunt"` only replaces files Terragrunt itself
+ * wrote; a file that came from the module's source makes it stop with
+ * "versions.tf already exists", before Terraform is ever run.
+ *
+ * The same block was removed from infra/aws/root.hcl for the same reason.
+ */
 
-      required_providers {
-        google = {
-          source  = "hashicorp/google"
-          version = "~> 6.0"
-        }
-        google-beta = {
-          source  = "hashicorp/google-beta"
-          version = "~> 6.0"
-        }
-      }
-    }
-  EOF
-}
 
 inputs = {
   project_id = local.project_id

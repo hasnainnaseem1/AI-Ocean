@@ -127,6 +127,7 @@ gcloud services enable \
   iam.googleapis.com \
   cloudresourcemanager.googleapis.com \
   serviceusage.googleapis.com \
+  cloudbilling.googleapis.com \
   iap.googleapis.com \
   networkmanagement.googleapis.com \
   storage.googleapis.com \
@@ -256,14 +257,49 @@ hamlawar VM bana sakta hai (paisa kharch — bura), magar isolation nahi tod sak
 gcloud iam service-accounts create terraform \
   --display-name="Terragrunt baseline apply"
 
-for ROLE in roles/compute.networkAdmin roles/compute.securityAdmin \
-            roles/iam.serviceAccountAdmin roles/storage.admin \
-            roles/resourcemanager.projectIamAdmin; do
+for ROLE in roles/compute.networkAdmin roles/compute.securityAdmin; do
   gcloud projects add-iam-policy-binding $PROJECT \
     --member="serviceAccount:terraform@$PROJECT.iam.gserviceaccount.com" \
     --role="$ROLE"
 done
+
+# State bucket par, SIRF us ek bucket par. Project-wide nahi.
+gcloud storage buckets add-iam-policy-binding gs://$STATE_BUCKET \
+  --member="serviceAccount:terraform@$PROJECT.iam.gserviceaccount.com" \
+  --role="roles/storage.admin"
 ```
+
+**Ab check kar lein ke dono role waqai lage.** Ye do minute baad me ek ghanta
+bachate hain:
+
+```bash
+gcloud projects get-iam-policy $PROJECT \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:terraform@$PROJECT.iam.gserviceaccount.com" \
+  --format="value(bindings.role)"
+```
+
+Dono `roles/compute.networkAdmin` **aur** `roles/compute.securityAdmin` nazar
+aane chahiye.
+
+Agar sirf pehla laga ho to apply **aadha** chalega, aur ye sab se bura tareeqa
+hai: VPC, subnet aur NAT ban jayenge — phir firewall par
+`403 compute.firewalls.create` aayega. Region adhoora khada rahega: network
+maujood, **isolation nahi**. Platform wahan machine banane se inkaar karta
+rahega, jo theek hai, magar wajah sirf apply ke log me dikhti hai.
+
+**Sirf ye do role + bucket. Aur kuch nahi.** Pehle yahan `serviceAccountAdmin`, `projectIamAdmin` aur
+project-wide `storage.admin` bhi likhe the — wo galat the:
+
+- Terraform yahan **koi IAM binding ya service account banata hi nahi** (service accounts upar haath se
+  bane hain). Ye roles kisi kaam ke nahi the.
+- `projectIamAdmin` wala account **khud ko koi bhi role de sakta hai** (`owner` tak), aur
+  `serviceAccountAdmin` wala `platform-runtime` ki nayi chabi bana sakta hai. Yani builder ki chabi chori
+  hui to alag-alag account rakhne ka poora faida khatam.
+- Project-wide `storage.admin` har bucket chhoo sakta hai; bucket par lagaya to sirf state bucket.
+
+Jo baqi hai wo AWS jaisa hi hai: `securityAdmin` firewall rule **bana** sakta hai to **badal** bhi sakta
+hai. Is liye ye chabi alag process me rehti hai, backend me kabhi nahi.
 
 Raasta A par ek binding folder par bhi chahiye, taake hierarchical firewall policy lag sake:
 

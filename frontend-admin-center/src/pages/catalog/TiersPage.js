@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Button, Space, Card, message, Tooltip, Row, Col,
   Tag, Modal, Form, Input, InputNumber, Switch, Select, Alert, Typography, Radio,
-  Divider, Empty, Statistic,
+  Divider, Empty,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined,
   CheckCircleOutlined, StopOutlined, DatabaseOutlined, DollarOutlined,
-  MinusCircleOutlined, PauseCircleOutlined, SettingOutlined, CloudServerOutlined,
+  MinusCircleOutlined, PauseCircleOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
@@ -15,11 +15,11 @@ import DataTable, { rowActions } from '../../components/common/DataTable';
 import { StatRow, StatCard } from '../../components/StatRow';
 import { usePermission } from '../../hooks/usePermission';
 import { tiersApi, resourceComponentsApi } from '../../api/catalogApi';
-import deploymentsApi from '../../api/deploymentsApi';
 import settingsApi from '../../api/settingsApi';
+import TierPriceMatrix from './TierPriceMatrix';
 import { PERMISSIONS } from '../../utils/permissions';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 const STATUS_OPTIONS = [
   { value: 'available', label: 'Available' },
@@ -83,6 +83,13 @@ const TiersPage = () => {
   const [categories, setCategories] = useState([]);
   // Which regions both clouds can serve, and which are actually built.
   const [regionInfo, setRegionInfo] = useState(null);
+  /*
+   * What this tier should earn over its cost. Null means "use the platform
+   * default", so a business-wide change to the target margin reaches every
+   * tier that has not deliberately been given its own.
+   */
+  const [targetMargin, setTargetMargin] = useState(null);
+  const [platformMargin, setPlatformMargin] = useState(0);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -114,6 +121,7 @@ const TiersPage = () => {
       setComponents(componentData.components || []);
       setCategories(categoryData.categories || []);
       setRegionInfo(regionData);
+      setPlatformMargin(Number(regionData?.targetMarginPercent) || 0);
     } catch {
       message.error('Failed to load tiers');
     } finally {
@@ -164,6 +172,7 @@ const TiersPage = () => {
   const openCreate = () => {
     setEditing(null);
     setQuote(null);
+    setTargetMargin(null);
     form.resetFields();
     form.setFieldsValue({
       currency: 'USD',
@@ -190,6 +199,7 @@ const TiersPage = () => {
   const openEdit = (tier) => {
     setEditing(tier);
     setQuote(null);
+    setTargetMargin(tier.targetMarginPercent ?? null);
     form.setFieldsValue({
       ...tier,
       categoryId: tier.categoryId || undefined,
@@ -233,6 +243,11 @@ const TiersPage = () => {
           flatPricePerHour: flatPricePerHour || 0,
           flatStoppedPricePerHour: flatStoppedPricePerHour || 0,
         },
+        // Null means "use the platform default" and must survive as null —
+        // coercing it to 0 would pin the tier to no margin at all.
+        targetMarginPercent: targetMargin === null || targetMargin === undefined || targetMargin === ''
+          ? null
+          : Number(targetMargin),
       };
 
       const result = editing
@@ -266,6 +281,32 @@ const TiersPage = () => {
       fetchAll();
     } catch (err) {
       if (err?.errorFields) return; // form validation, already highlighted
+
+      /*
+       * A region with no recorded cost is refused rather than saved, and the
+       * fix is on a different screen — so it gets a dialog with a way to get
+       * there, not a toast that vanishes before it can be acted on.
+       */
+      if (err.response?.data?.code === 'REGION_NOT_COSTED') {
+        Modal.error({
+          title: 'This region has no cost recorded yet',
+          width: 540,
+          content: (
+            <Space direction="vertical" size={10} style={{ marginTop: 8 }}>
+              <Text>{err.response.data.message}</Text>
+              <Text type="secondary" style={{ fontSize: 12.5 }}>
+                A region costs money to keep open even with nothing running in it — on AWS about
+                $65 a month for the NAT alone. Until that is recorded, a tier sold there would be
+                priced short by it.
+              </Text>
+            </Space>
+          ),
+          okText: 'Take me there',
+          onOk: () => navigate('/cloud'),
+        });
+        return;
+      }
+
       message.error(err.response?.data?.message || 'Could not save the tier');
     } finally {
       setSaving(false);
@@ -493,7 +534,7 @@ const TiersPage = () => {
         onOk={save}
         onCancel={() => setModalOpen(false)}
         confirmLoading={saving}
-        width={880}
+        width={1100}
         okText={editing ? 'Save changes' : 'Create tier'}
       >
         <Form
@@ -527,7 +568,29 @@ const TiersPage = () => {
             <Input.TextArea rows={2} placeholder="What this machine is good for" />
           </Form.Item>
 
-          <Divider orientation="left" style={{ marginTop: 8 }}>Pricing</Divider>
+          <Divider titlePlacement="left" style={{ marginTop: 8 }}>Pricing</Divider>
+
+          {/*
+            * Two price ideas now live on this form, and without a word between
+            * them an operator cannot tell which one a customer pays. This says
+            * it outright: the figure below is a starting point and a fallback,
+            * and the table further down is what is actually charged.
+            */}
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 14, borderRadius: 10 }}
+            message="What a customer actually pays is further down"
+            description={(
+              <>
+                The price here is the starting point, and what is used if a cloud has not
+                quoted this tier yet. The real prices — one per cloud and region, because the
+                same machine costs a different amount in each — are in
+                {' '}<Text strong>What this sells for</Text> below, worked out from what the
+                clouds charge.
+              </>
+            )}
+          />
 
           <Form.Item name="pricingMode" label="How is this tier priced?">
             <Radio.Group optionType="button" buttonStyle="solid">
@@ -549,11 +612,22 @@ const TiersPage = () => {
             <FlatPricing currency={currency} />
           )}
 
-          <CloudCostPanel
-            form={form}
-            quote={quote}
-            pricingMode={pricingMode}
-            currency={currency}
+          {/*
+            * One row per cloud and region, replacing a panel that showed a
+            * single figure for `regions[0]` and asked Google for it whatever
+            * cloud the machine would actually be built on — so the cost shown
+            * for an AWS tier was not that tier's cost.
+            *
+            * Only for a saved tier: an unsaved one has no id to price against,
+            * and no row in the matrix to read.
+            */}
+          <TierPriceMatrix
+            tierId={editing?.id || editing?.tierId || null}
+            tierName={editing?.name}
+            marginPercent={targetMargin}
+            platformMargin={platformMargin}
+            onMarginChange={setTargetMargin}
+            canEdit={canEdit}
           />
 
           <Divider orientation="left">Availability</Divider>
@@ -637,266 +711,6 @@ const TiersPage = () => {
  * Specs are not typed here — they are read off the parts. Picking two H100s
  * makes it a 2-accelerator machine; picking 500 GB of NVMe makes that its disk.
  */
-/**
- * What this tier costs us, while it is being written.
- *
- * ── Why this is on the tier form ──
- *
- * Everything above decides what the customer pays. Nothing above it knows what
- * the machine costs, so a tier can be saved at a price that loses money on
- * every hour it runs, and nobody finds out until the cloud invoice arrives a
- * month later. That is the single most expensive mistake this screen allows,
- * and it is invisible.
- *
- * So the floor is shown here, next to the price, recomputed as either one
- * moves.
- *
- * ── It is the same answer provisioning will give ──
- *
- * The server runs the real spec mapper and the real pricing engine — the same
- * two steps that run when a customer buys this tier. A second implementation
- * in the browser would be free to drift, and the one that drifted would be the
- * screen, which is the one people trust.
- */
-const CloudCostPanel = ({ form, quote, pricingMode, currency }) => {
-  const [cost, setCost] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const ticket = useRef(0);
-  const timer = useRef(null);
-
-  // Watched so the panel reacts to specs and price, not to every keystroke in
-  // the name field.
-  const vcpu = Form.useWatch('vcpu', form);
-  const ramGb = Form.useWatch('ramGb', form);
-  const gpuModel = Form.useWatch('gpuModel', form);
-  const gpuCount = Form.useWatch('gpuCount', form);
-  const vramGb = Form.useWatch('vramGb', form);
-  const storageGb = Form.useWatch('storageGb', form);
-  const storageType = Form.useWatch('storageType', form);
-  const regions = Form.useWatch('regions', form);
-  const flatPrice = Form.useWatch('flatPricePerHour', form);
-
-  const refresh = useCallback(async () => {
-    const values = form.getFieldsValue();
-
-    /*
-     * In components mode the specs are read off the parts by the server, so
-     * they live on the quote rather than in the form — using the form fields
-     * there would price an empty machine. In flat mode they are typed, and the
-     * form is the only source.
-     */
-    const specs = pricingMode === 'components' ? (quote?.specs || null) : values;
-    const sellPrice = pricingMode === 'components'
-      ? Number(quote?.pricePerHour) || 0
-      : Number(values.flatPricePerHour) || 0;
-
-    if (!specs || (!Number(specs.vcpu) && !Number(specs.ramGb) && !Number(specs.gpuCount))) {
-      setCost(null);
-      return;
-    }
-
-    const mine = ++ticket.current;
-    setBusy(true);
-    try {
-      const data = await deploymentsApi.priceQuote({
-        vcpu: Number(specs.vcpu) || 0,
-        ramGb: Number(specs.ramGb) || 0,
-        gpuModel: specs.gpuModel || '',
-        gpuCount: Number(specs.gpuCount) || 0,
-        vramGb: Number(specs.vramGb) || 0,
-        storageGb: Number(specs.storageGb) || 0,
-        storageType: specs.storageType || 'SSD',
-        networkGbps: Number(specs.networkGbps) || 0,
-        region: (values.regions || [])[0] || 'default',
-        sellPricePerHour: sellPrice,
-      });
-      if (mine === ticket.current) setCost(data);
-    } catch {
-      if (mine === ticket.current) setCost(null);
-    } finally {
-      if (mine === ticket.current) setBusy(false);
-    }
-  }, [form, quote, pricingMode]);
-
-  useEffect(() => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(refresh, 400);
-    return () => clearTimeout(timer.current);
-  }, [refresh, vcpu, ramGb, gpuModel, gpuCount, vramGb, storageGb, storageType, regions, flatPrice]);
-
-  if (!cost && !busy) return null;
-
-  // ── The machine cannot be built at all ──
-  if (cost && cost.ok === false && cost.stage === 'shape') {
-    return (
-      <Alert
-        type="error"
-        showIcon
-        style={{ marginTop: 16, borderRadius: 10 }}
-        message="No cloud machine matches these specs"
-        description={(
-          <>
-            {cost.reason}
-            <br />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              A customer could buy this tier and nothing could be built for them. Change the
-              specs, or keep it for manual fulfilment only.
-            </Text>
-          </>
-        )}
-      />
-    );
-  }
-
-  // ── Nobody can say what it costs ──
-  if (cost && cost.ok === false) {
-    return (
-      <Alert
-        type="warning"
-        showIcon
-        style={{ marginTop: 16, borderRadius: 10 }}
-        message="This tier's cost is unknown, so nothing can check its price"
-        description={(
-          <>
-            {cost.reason}
-            {cost.machineType && (
-              <>
-                {' '}It maps to <Text code>{cost.machineType}</Text>.
-              </>
-            )}
-          </>
-        )}
-      />
-    );
-  }
-
-  const TONE = {
-    loss: { type: 'error', title: 'This tier loses money on every hour it runs' },
-    below_target: { type: 'warning', title: 'Profitable, but under the margin you asked for' },
-    ok: { type: 'success', title: 'This price covers its cost' },
-    unknown: { type: 'info', title: 'Cost unknown' },
-  };
-  const tone = TONE[cost?.verdict] || TONE.unknown;
-
-  return (
-    <Card
-      size="small"
-      loading={busy && !cost}
-      title={(
-        <Space>
-          <CloudServerOutlined />
-          What this costs us
-          {cost?.source && (
-            <Tag color={cost.source === 'live' ? 'green' : 'default'}>
-              {cost.source === 'live' ? 'live prices' : 'recorded by hand'}
-            </Tag>
-          )}
-        </Space>
-      )}
-      style={{ marginTop: 16, borderRadius: 12 }}
-    >
-      {cost && (
-        <>
-          <Alert
-            type={tone.type}
-            showIcon
-            style={{ marginBottom: 14, borderRadius: 8 }}
-            message={tone.title}
-            description={
-              cost.verdict === 'loss'
-                ? `Every hour costs ${money2(cost.shortfall, cost.currency)} more than it earns.`
-                : cost.verdict === 'below_target'
-                  ? `It makes ${cost.marginPercent}%. Raising it by ${money2(cost.shortfall, cost.currency)}/hr reaches your target.`
-                  : `Margin ${cost.marginPercent}%.`
-            }
-          />
-
-          <Row gutter={[16, 10]}>
-            <Col xs={12} md={6}>
-              <Statistic
-                title="Builds as"
-                value={cost.machineType || '—'}
-                valueStyle={{ fontSize: 15, fontFamily: 'monospace' }}
-              />
-            </Col>
-            <Col xs={12} md={6}>
-              <Statistic
-                title="Costs us"
-                value={cost.cost?.totalCost ?? 0}
-                precision={4}
-                prefix="$"
-                suffix="/hr"
-                valueStyle={{ fontSize: 16 }}
-              />
-            </Col>
-            <Col xs={12} md={6}>
-              <Statistic
-                title="Lowest sane price"
-                value={cost.floorPrice ?? 0}
-                precision={4}
-                prefix="$"
-                suffix="/hr"
-                valueStyle={{ fontSize: 16, color: '#1A9655' }}
-              />
-            </Col>
-            <Col xs={12} md={6}>
-              <Statistic
-                title="This tier sells at"
-                value={pricingMode === 'components'
-                  ? (quote?.pricePerHour ?? 0)
-                  : (Number(form.getFieldValue('flatPricePerHour')) || 0)}
-                precision={4}
-                prefix="$"
-                suffix="/hr"
-                valueStyle={{
-                  fontSize: 16,
-                  color: cost.verdict === 'loss' ? '#DC3D42' : undefined,
-                }}
-              />
-            </Col>
-          </Row>
-
-          {/*
-            * The provider may have no shape that matches exactly, and the
-            * mapper never gives a customer LESS than they bought — so when it
-            * differs, the customer gets more and the platform pays for it.
-            * Worth seeing while the tier is being written.
-            */}
-          {cost.built && cost.asked
-            && (cost.built.vcpu !== cost.asked.vcpu || cost.built.ramGb !== cost.asked.ramGb) && (
-            <Alert
-              type="info"
-              showIcon
-              style={{ marginTop: 12, borderRadius: 8 }}
-              message="The cloud has no exact match, so this machine is bigger than the tier says"
-              description={`Sold as ${cost.asked.vcpu} vCPU / ${cost.asked.ramGb} GB, built as `
-                + `${cost.built.vcpu} vCPU / ${cost.built.ramGb} GB. The cost above is for what is `
-                + 'actually built.'}
-            />
-          )}
-
-          {(cost.planNotes || []).length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              {cost.planNotes.map((n) => (
-                <div key={n}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>• {n}</Text>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {cost.source === 'recorded' && (
-            <Paragraph type="secondary" style={{ fontSize: 12, margin: '12px 0 0' }}>
-              This figure was typed in by hand. Connect Google Cloud and it is read from the
-              provider automatically instead.
-            </Paragraph>
-          )}
-        </>
-      )}
-    </Card>
-  );
-};
-
 const ComponentBuilder = ({ form, options, components, quote, quoting, currency }) => {
   const byId = new Map(components.map((c) => [c.id, c]));
   const picks = Form.useWatch('components', form) || [];

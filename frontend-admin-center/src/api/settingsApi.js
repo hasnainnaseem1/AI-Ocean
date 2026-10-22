@@ -166,6 +166,64 @@ const settingsApi = {
     axiosInstance.get('/api/v1/admin/settings/cloud-regions').then((r) => r.data),
 
   /**
+   * GET /api/v1/admin/settings/region-costs
+   *
+   * What each region costs to keep open before a customer machine runs in it —
+   * chiefly NAT, which AWS bills per availability zone whether anything uses
+   * it or not. Comes back with the recovery and the spread ladder.
+   */
+  getRegionCosts: () =>
+    axiosInstance.get('/api/v1/admin/settings/region-costs').then((r) => r.data),
+
+  /** PUT — set the assumed machine count, or record a cost by hand. */
+  updateRegionCost: (data) =>
+    axiosInstance.put('/api/v1/admin/settings/region-costs', data).then((r) => r.data),
+
+  /**
+   * GET /api/v1/admin/settings/alerts
+   *
+   * Every system alert, who currently hears about it, and which groups it
+   * could be pointed at instead. The audiences come from the database, so a
+   * role created this morning is selectable this morning.
+   */
+  getAlerts: () =>
+    axiosInstance.get('/api/v1/admin/settings/alerts').then((r) => r.data),
+
+  /** POST — ask both clouds now instead of waiting for the hourly job. */
+  refreshRegionCosts: () =>
+    axiosInstance.post('/api/v1/admin/settings/region-costs/refresh').then((r) => r.data),
+
+  /**
+   * GET /api/v1/admin/settings/region-builds
+   *
+   * Which regions have a network and which do not — and which ones have
+   * customer orders waiting on them right now.
+   *
+   * Deliberately separate from `getRegionCosts`. A region is costed before it
+   * is built, so that its standing cost is inside every price from the start;
+   * "what does it cost" and "can a machine start there" are two facts that
+   * come apart, and an admin needs both.
+   */
+  getRegionBuilds: () =>
+    axiosInstance.get('/api/v1/admin/settings/region-builds').then((r) => r.data),
+
+  /**
+   * POST — ask for a region's network to be built.
+   *
+   * Records the request and returns the commands to run. It does NOT run them:
+   * the platform's own AWS key can start and stop machines and nothing else,
+   * which is what keeps one customer's machine from ever reaching another's.
+   */
+  buildRegion: (region) =>
+    axiosInstance.post(`/api/v1/admin/settings/region-builds/${region}/build`).then((r) => r.data),
+
+  /** POST — record that an apply did not finish, so it can be tried again. */
+  failRegionBuild: (region, error) =>
+    axiosInstance
+      .post(`/api/v1/admin/settings/region-builds/${region}/failed`, { error })
+      .then((r) => r.data),
+
+  /**
    * PUT /api/v1/admin/settings/cloud-routing
    * Which cloud wins when more than one is on and a model is unassigned.
    */

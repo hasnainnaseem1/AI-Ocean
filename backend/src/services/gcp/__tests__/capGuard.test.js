@@ -268,3 +268,41 @@ test('a call with no arguments at all is refused rather than throwing', () => {
     assert.strictEqual(typeof r.code, 'string');
   }
 });
+
+test.describe('the tier snapshot is read from where it actually lives', () => {
+  /*
+   * ── The bug this is about ──
+   *
+   * The deployment row stores `tier_storage_type`, but the wrapped document
+   * the guard is handed groups that snapshot under `tier` — so
+   * `deployment.tierStorageType` is `undefined` even when the row says "SSD".
+   *
+   * The cost model needs a disk type to find a disk rate. Without one it
+   * reported the whole machine as unpriceable, and the guard did the safe
+   * thing and refused. The result was that EVERY Google deployment was held
+   * with COST_UNKNOWN — "no hourly cost could be worked out" — while the live
+   * price sat one field away. The refusal was correct; the input was not.
+   */
+  const { readStorage } = require('../capGuard');
+
+  test('the wrapped shape is understood', () => {
+    const wrapped = { tier: { storageType: 'SSD', storageGb: 20 } };
+    assert.equal(readStorage(wrapped).storageType, 'SSD');
+  });
+
+  test('and so is the flat row, which some paths still pass', () => {
+    const flat = { tierStorageType: 'HDD', tierStorageGb: 40 };
+    assert.equal(readStorage(flat).storageType, 'HDD');
+  });
+
+  test('the nested one wins, because it is the shape the service returns', () => {
+    const both = { tier: { storageType: 'SSD' }, tierStorageType: 'HDD' };
+    assert.equal(readStorage(both).storageType, 'SSD');
+  });
+
+  test('neither shape present is reported as missing, not guessed', () => {
+    // A guess here would price a disk at the wrong rate, which is worse than
+    // refusing — the refusal is visible, a wrong price is not.
+    assert.equal(readStorage({}).storageType, '');
+  });
+});

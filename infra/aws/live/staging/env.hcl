@@ -4,8 +4,18 @@
  * Where the first real EC2 instance gets created and the isolation proof is
  * run, somewhere that has no customers in it.
  *
- * Fill in `account_id`, `state_bucket` and `lock_table` from SETUP.md. Nothing
- * else here needs changing to get started.
+ * ── What lives here, and what does not ──
+ *
+ * Only things that are true of the whole ACCOUNT. Anything that belongs to one
+ * region — the VPC's address range, which availability zones to use — lives in
+ * that region's own `region.hcl`, because on AWS a network belongs to exactly
+ * one region and so does everything hanging off it.
+ *
+ * This file used to carry a `default_region` and a `regions` map. Only
+ * `regions[default_region]` was ever read, so listing three regions built one
+ * and the other two failed at launch with no sign of why.
+ *
+ * Fill in `account_id`, `state_bucket` and `lock_table` from SETUP.md.
  */
 
 locals {
@@ -17,28 +27,14 @@ locals {
   account_id = "REPLACE-ME-123456789012"
 
   # Created once by the AWS CLI before the first apply — see SETUP.md step 3.
+  #
+  # ONE bucket and ONE lock table for every region. State is not regional data:
+  # keeping it in one place means one backup to look after and one bucket
+  # policy to get right, and the per-unit key already separates the regions.
   state_bucket = "REPLACE-ME-aiocean-staging-tfstate"
   lock_table   = "REPLACE-ME-aiocean-staging-tflock"
 
-  default_region = "eu-west-1"
-
-  # The platform's region names mapped to real AWS regions. The backend holds
-  # the same mapping in code (backend/src/services/aws/awsRegionMap.js); these
-  # two must agree.
-  #
-  # Two availability zones per region: a single-AZ outage is the common AWS
-  # failure, and spreading machines across two costs nothing extra.
-  regions = {
-    "eu-west-1" = {
-      azs = ["eu-west-1a", "eu-west-1b"] # platform region: eu-central
-    }
-  }
-
-  # The whole address range for the customer VPC. A /16 leaves room for many
-  # availability zones without renumbering — and renumbering a live subnet
-  # means recreating every machine in it.
-  #
-  # Deliberately well clear of the GCP side's 10.20-10.22 ranges, so the two
-  # clouds could one day be peered without a collision.
-  vpc_cidr = "10.30.0.0/16"
+  # Where that bucket itself lives. Nothing to do with where machines are
+  # built — a unit in ap-south-1 still reads its state from here.
+  state_bucket_region = "eu-west-1"
 }

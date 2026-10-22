@@ -117,6 +117,7 @@ const DeploymentDetailPage = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [requirementsOpen, setRequirementsOpen] = useState(false);
 
+  const [holdAlternative, setHoldAlternative] = useState(null);
   const [apiKey, setApiKey] = useState(null);
   const [revealing, setRevealing] = useState(false);
 
@@ -127,6 +128,7 @@ const DeploymentDetailPage = () => {
       .then((data) => {
         setDeployment(data.deployment);
         setStorageGrace(data.storageGrace || null);
+        setHoldAlternative(data.holdAlternative || null);
         setPaygAvailable(data.paygAvailable !== false);
         setError(null);
         // Runway is what tells someone their machine is about to be stopped.
@@ -633,16 +635,129 @@ const DeploymentDetailPage = () => {
         />
       )}
 
-      {['pending_review', 'approved', 'provisioning'].includes(deployment.status) && (
+      {/*
+        * Why this order is waiting, when we know.
+        *
+        * The generic notice below says "under review" and nothing else, which
+        * is all a customer used to get when the platform held an order back —
+        * no reason, no end to it, and nothing to do but give up. When the
+        * server can say what happened, it says that instead, with a timeframe
+        * and a way forward.
+        */}
+      {deployment.hold && (
+        <Alert
+          type="warning"
+          showIcon
+          message={deployment.hold.title}
+          description={(
+            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              <Text>{deployment.hold.body}</Text>
+
+              {deployment.hold.minutesWaiting > 0 && (
+                <Text type="secondary" style={{ fontSize: 12.5 }}>
+                  Waiting {deployment.hold.minutesWaiting < 60
+                    ? `${deployment.hold.minutesWaiting} minute${deployment.hold.minutesWaiting === 1 ? '' : 's'}`
+                    : `${Math.floor(deployment.hold.minutesWaiting / 60)} hour${Math.floor(deployment.hold.minutesWaiting / 60) === 1 ? '' : 's'}`}
+                  {deployment.hold.expectedWithinMinutes
+                    ? ` · usually clears within ${deployment.hold.expectedWithinMinutes} minutes`
+                    : ''}
+                </Text>
+              )}
+
+              {/*
+                * The machine they could actually have, named.
+                *
+                * The sentence above already says "pick a different machine" or
+                * "pick a region we already run in". On its own that sent them
+                * back to the catalogue to work out for themselves what runs
+                * their model, exists where they want it, and is sellable
+                * today — three things we know and they do not. This is the
+                * half that says which.
+                */}
+              {holdAlternative && (
+                <div
+                  style={{
+                    background: 'var(--ant-color-bg-container, #fff)',
+                    border: '1px solid var(--ant-color-border, #e5e7eb)',
+                    borderRadius: 10,
+                    padding: '10px 12px',
+                  }}
+                >
+                  <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                    <Text strong style={{ fontSize: 13 }}>{holdAlternative.title}</Text>
+                    <Text style={{ fontSize: 13 }}>{holdAlternative.body}</Text>
+                  </Space>
+                </div>
+              )}
+
+              <Space wrap>
+                <Button size="small" icon={<ReloadOutlined />} onClick={load}>
+                  {t('common:action.refresh')}
+                </Button>
+                {/*
+                  * A way out that works right now. Not offered for a funding
+                  * hold: changing machine does not help an account that cannot
+                  * pay, and suggesting it sends them round a loop.
+                  */}
+                {deployment.hold.canSwitchMachine && (
+                  <Button
+                    size="small"
+                    type="primary"
+                    onClick={() => navigate(holdAlternative?.modelSlug
+                      /*
+                       * Straight to the thing we just named, not to an empty
+                       * wizard. Naming an alternative and then making them
+                       * find it again is most of the way to not having
+                       * suggested one.
+                       */
+                      /*
+                       * The wizard is addressed as `/deploy/:slug?machine=`
+                       * — a tier id on its own means nothing to it, and a
+                       * link it cannot read drops the customer into an empty
+                       * flow, which is worse than the generic button.
+                       */
+                      ? `/deploy/${holdAlternative.modelSlug}?machine=${encodeURIComponent(holdAlternative.tierId)}`
+                      : '/deploy')}
+                  >
+                    {holdAlternative?.modelSlug
+                      ? (holdAlternative.movingRegion
+                        ? `Start in ${holdAlternative.region}`
+                        : `Use ${holdAlternative.tierName}`)
+                      : 'Pick a different machine'}
+                  </Button>
+                )}
+                {deployment.hold.kind === 'funds' && (
+                  <Button size="small" type="primary" onClick={() => navigate('/wallet')}>
+                    Add credit
+                  </Button>
+                )}
+              </Space>
+            </Space>
+          )}
+          style={{ marginBottom: 20, borderRadius: 12 }}
+        />
+      )}
+
+      {!deployment.hold && ['pending_review', 'approved', 'provisioning'].includes(deployment.status) && (
         <Alert
           type="info"
           showIcon
           message={
             deployment.status === 'pending_review'
               ? t('deployments:alerts.underReview')
-              : t('deployments:alerts.beingSetUp')
+              /*
+               * Once the machine is up the honest headline changes. Saying
+               * "being set up" and "billing starts when it runs" while the
+               * hourly charge is already accruing tells the customer
+               * something false, in the direction that costs trust.
+               */
+              : (deployment.machineStartedAt
+                ? t('deployments:alerts.machineUp')
+                : t('deployments:alerts.beingSetUp'))
           }
-          description={t('deployments:alerts.emailWhenLive')}
+          description={deployment.machineStartedAt
+            ? t('deployments:alerts.machineUpDetail')
+            : t('deployments:alerts.emailWhenLive')}
           action={<Button size="small" icon={<ReloadOutlined />} onClick={load}>{t('common:action.refresh')}</Button>}
           style={{ marginBottom: 20, borderRadius: 12 }}
         />
@@ -744,10 +859,16 @@ const DeploymentDetailPage = () => {
           icon={<CalendarOutlined />}
           tone="blue"
           label={t('deployments:detail.startedOn')}
-          value={deployment.startedAt
-            ? formatDate(deployment.startedAt, 'monthDay')
+          value={(deployment.startedAt || deployment.machineStartedAt)
+            ? formatDate(deployment.startedAt || deployment.machineStartedAt, 'monthDay')
             : t('deployments:detail.notYet')}
-          caption={deployment.startedAt ? t('deployments:detail.startedCaption') : t('deployments:detail.notStartedCaption')}
+          caption={(() => {
+            if (deployment.startedAt) return t('deployments:detail.startedCaption');
+            // Machine up, model not live yet: the date is real and so is the
+            // meter, so say that instead of "billing starts when it runs".
+            if (deployment.machineStartedAt) return t('deployments:detail.machineStartedCaption');
+            return t('deployments:detail.notStartedCaption');
+          })()}
         />
       </StatRow>
 

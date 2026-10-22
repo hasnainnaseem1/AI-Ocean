@@ -15,6 +15,7 @@ import deploymentsApi from '../../api/deploymentsApi';
 import CloudMachinePanel from './CloudMachinePanel';
 import usersApi from '../../api/usersApi';
 import { PERMISSIONS } from '../../utils/permissions';
+import { formatRate, RATE_DECIMALS } from '../../utils/money';
 import { STATUS_META } from './DeploymentsListPage';
 
 const { Text, Paragraph } = Typography;
@@ -193,7 +194,7 @@ const DeploymentDetailPage = () => {
   const usageColumns = [
     { title: 'Period start', dataIndex: 'periodStart', render: formatDateTime },
     { title: 'Hours', dataIndex: 'hours', align: 'right', width: 90, render: (h) => h.toFixed(2) },
-    { title: 'Rate', dataIndex: 'rate', align: 'right', width: 100, render: (r) => r.toFixed(2) },
+    { title: 'Rate', dataIndex: 'rate', align: 'right', width: 100, render: (r) => formatRate(r) },
     { title: 'Charged', dataIndex: 'amount', align: 'right', width: 110, render: (a) => <Text strong>{deployment.currency} {a.toFixed(2)}</Text> },
   ];
 
@@ -257,7 +258,7 @@ const DeploymentDetailPage = () => {
       {/* Cost summary */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
         <Col xs={12} md={6}>
-          <Card><Statistic title="Hourly rate" value={effectiveRate} precision={2} prefix={deployment.currency} /></Card>
+          <Card><Statistic title="Hourly rate" value={effectiveRate} precision={RATE_DECIMALS} prefix={deployment.currency} /></Card>
         </Col>
         <Col xs={12} md={6}>
           <Card><Statistic title="Runtime" value={deployment.totalRuntimeHours || 0} precision={1} suffix="h" /></Card>

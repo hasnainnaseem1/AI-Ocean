@@ -56,6 +56,18 @@ const deploymentsApi = {
       : axiosInstance.get('/api/v1/customer/deployments/checkout-options', { params })
     ).then((r) => r.data),
 
+  /**
+   * GET /api/v1/customer/deployments/places
+   *
+   * Where this model on this machine can run, each with its own hourly price.
+   * The same machine costs a different amount in each region, so the choice
+   * and its cost have to be shown together.
+   */
+  getPlaces: (params) =>
+    axiosInstance
+      .get('/api/v1/customer/deployments/places', { params })
+      .then((r) => r.data),
+
   /** POST /api/v1/customer/deployments */
   create: (payload) =>
     axiosInstance.post('/api/v1/customer/deployments', payload).then((r) => r.data),

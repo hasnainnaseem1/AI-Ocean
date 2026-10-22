@@ -27,3 +27,21 @@ output "private_route_table_ids" {
   value       = { for az, rt in aws_route_table.private : az => rt.id }
   description = "The nat module adds the default route to these."
 }
+
+/*
+ * The internet gateway, consumed by the `nat` unit.
+ *
+ * Not decoration: a NAT gateway is useless until the VPC's internet gateway is
+ * attached, and Terraform cannot see that from the resource graph. Passing
+ * this id into `nat` is how that ordering is expressed — it is an input that
+ * cannot exist until the network is built, which `depends_on` on a variable
+ * only pretends to be.
+ *
+ * The `nat` unit has always asked for it. Without this output it resolved only
+ * against the mock, which Terragrunt allows for `validate` and `plan` — so the
+ * stack planned cleanly and failed on the first real apply.
+ */
+output "internet_gateway_id" {
+  value       = aws_internet_gateway.main.id
+  description = "Consumed by the nat module, so NAT is never built before its route out exists."
+}

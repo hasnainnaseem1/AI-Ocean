@@ -90,8 +90,23 @@ const scoreTiers = (model, facts, profile, policy) => {
   const minPerf = Math.min(...perfs);
   const maxPerf = Math.max(...perfs);
 
-  // Whichever is stricter: what the model itself needs, or what the answers imply.
-  const requiredVram = Math.max(model.minVramGb || 0, profile.floors.minVramGb || 0);
+  /*
+   * Whichever is stricter: what the model itself needs, or what the answers
+   * imply.
+   *
+   * All four, not just VRAM. The other three used to come from the customer's
+   * answers alone — which is right for "how busy will it be" and useless for
+   * "will it start": a model needing two cards does not need them because of
+   * anyone's traffic, it needs them because the weights do not fit on one. A
+   * model that never stated its own floor contributes 0 and nothing changes.
+   */
+  const required = {
+    vramGb: Math.max(model.minVramGb || 0, profile.floors.minVramGb || 0),
+    gpuCount: Math.max(model.minGpuCount || 0, profile.floors.minGpuCount || 0),
+    vcpu: Math.max(model.minVcpu || 0, profile.floors.minVcpu || 0),
+    ramGb: Math.max(model.minRamGb || 0, profile.floors.minRamGb || 0),
+  };
+  const requiredVram = required.vramGb;
 
   const costWeight = profile.priorities.costPriority === null
     ? cfg.defaultCostPriority
@@ -146,29 +161,37 @@ const scoreTiers = (model, facts, profile, policy) => {
         }
       }
 
-      // ── 2. Remaining floors from the profile ──
-      if (profile.floors.minGpuCount && fact.tier.gpuCount < profile.floors.minGpuCount) {
+      /*
+       * ── 2. The remaining floors ──
+       *
+       * `required` already holds the stricter of the model's own floor and the
+       * one the answers imply, so a model that needs two cards is now short of
+       * a one-card tier even when the customer asked for nothing in
+       * particular. Before this, only the answers were consulted here and a
+       * model's own needs went unchecked.
+       */
+      if (required.gpuCount && fact.tier.gpuCount < required.gpuCount) {
         score -= cfg.floors.gpuCountPenalty;
         issues.push({
           code: 'GPU_COUNT_SHORTFALL',
           severity: 'medium',
-          message: render(copy.GPU_COUNT_SHORTFALL, ctx({ requirement: fmt(profile.floors.minGpuCount) })),
+          message: render(copy.GPU_COUNT_SHORTFALL, ctx({ requirement: fmt(required.gpuCount) })),
         });
       }
-      if (profile.floors.minVcpu && (fact.tier.vcpu || 0) < profile.floors.minVcpu) {
+      if (required.vcpu && (fact.tier.vcpu || 0) < required.vcpu) {
         score -= cfg.floors.vcpuPenalty;
         issues.push({
           code: 'VCPU_SHORTFALL',
           severity: 'low',
-          message: render(copy.VCPU_SHORTFALL, ctx({ requirement: fmt(profile.floors.minVcpu) })),
+          message: render(copy.VCPU_SHORTFALL, ctx({ requirement: fmt(required.vcpu) })),
         });
       }
-      if (profile.floors.minRamGb && (fact.tier.ramGb || 0) < profile.floors.minRamGb) {
+      if (required.ramGb && (fact.tier.ramGb || 0) < required.ramGb) {
         score -= cfg.floors.ramPenalty;
         issues.push({
           code: 'RAM_SHORTFALL',
           severity: 'low',
-          message: render(copy.RAM_SHORTFALL, ctx({ requirement: fmt(profile.floors.minRamGb) })),
+          message: render(copy.RAM_SHORTFALL, ctx({ requirement: fmt(required.ramGb) })),
         });
       }
 

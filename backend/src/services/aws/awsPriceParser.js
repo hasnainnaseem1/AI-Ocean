@@ -277,11 +277,101 @@ const ratesFromPriceList = (priceList, { instanceType, regionCode, currency = 'U
   };
 };
 
+/**
+ * What one NAT gateway costs per hour in a region.
+ *
+ * ── Why this is priced at all ──
+ *
+ * A NAT gateway is charged whether a customer machine uses it or not: about
+ * $0.045 an hour, per availability zone, standing. For a two-zone region that
+ * is roughly $65 a month before anyone deploys anything. Priced live for the
+ * same reason instances are — a figure typed in by hand goes stale quietly,
+ * and a stale figure that is too low prices a whole region below cost.
+ *
+ * ── Hours, not gigabytes ──
+ *
+ * `AmazonVPC` also publishes the per-GB data-processing charge, in the same
+ * product family. That one scales with traffic nobody can predict per machine,
+ * so it is deliberately not taken here; only the dimension billed in hours is.
+ * Taking the wrong one would add a per-GB number to an hourly cost and inflate
+ * every price in the region by a factor of nothing in particular.
+ *
+ * @param {Array} priceList  whatever `GetProducts` returned for AmazonVPC
+ * @param {object} opts
+ * @param {string} opts.regionCode  e.g. "eu-west-1"
+ * @returns {{ok, natGatewayHour, currency, matched, notes}}
+ */
+const natGatewayRateFrom = (priceList, { regionCode, currency = 'USD' } = {}) => {
+  const notes = [];
+  const candidates = [];
+
+  for (const entry of priceList || []) {
+    const product = parseEntry(entry);
+    const attributes = product?.product?.attributes;
+    if (!attributes) continue;
+
+    if (regionCode && String(attributes.regionCode || '') !== String(regionCode)) continue;
+
+    // The family name AWS publishes for this. Checked rather than assumed,
+    // because the same service also carries endpoints and traffic mirroring.
+    const family = String(product?.product?.productFamily || '');
+    if (!/nat\s*gateway/i.test(family)) continue;
+
+    const priced = onDemandPrice(product, currency);
+    if (!priced) continue;
+
+    /*
+     * Hours only. `usagetype` reads like `EU-NatGateway-Hours` for the
+     * standing charge and `EU-NatGateway-Bytes` for data processing; the unit
+     * is the more reliable of the two, so both are checked.
+     */
+    const unit = String(priced.unit || '').toLowerCase();
+    const usage = String(attributes.usagetype || '');
+    if (!unit.includes('hour') && !/hours?$/i.test(usage)) continue;
+
+    candidates.push({ price: priced.price, usagetype: usage, unit: priced.unit });
+  }
+
+  if (!candidates.length) {
+    return {
+      ok: false,
+      natGatewayHour: null,
+      currency,
+      matched: null,
+      notes,
+      reason: `AWS published no NAT gateway hourly price for ${regionCode || 'that region'}.`,
+    };
+  }
+
+  /*
+   * On ambiguity take the HIGHEST, the same rule the instance parser uses. A
+   * guess that is too high loses a sale; a guess that is too low loses money
+   * on every hour the region is open.
+   */
+  candidates.sort((a, b) => b.price - a.price);
+  if (candidates.length > 1) {
+    notes.push(
+      `AWS published ${candidates.length} NAT gateway hourly prices for ${regionCode}; `
+      + 'took the highest.'
+    );
+  }
+
+  return {
+    ok: true,
+    natGatewayHour: candidates[0].price,
+    currency,
+    matched: candidates[0],
+    notes,
+    reason: null,
+  };
+};
+
 module.exports = {
   ON_DEMAND_INSTANCE,
   parseEntry,
   onDemandPrice,
   instanceRateFrom,
   volumeRatesFrom,
+  natGatewayRateFrom,
   ratesFromPriceList,
 };

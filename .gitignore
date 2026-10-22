@@ -35,3 +35,4 @@ crash.*.log
 *-service-account.json
 gcp-key*.json
 application_default_credentials.json
+ai-ocean-builder.json

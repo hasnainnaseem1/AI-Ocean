@@ -166,6 +166,21 @@ const serialize = (deployment, { full = false } = {}) => {
     billingMethod: deployment.billingMethod || 'prepaid',
     paygOfferedAt: deployment.paygOfferedAt || null,
     startedAt: deployment.startedAt,
+    /*
+     * When the MACHINE started, which is not the same fact as `startedAt`.
+     *
+     * `startedAt` is set when the deployment's status becomes `running` — and
+     * on a cloud deployment that is the model going live, a step that comes
+     * after the machine is up. In between, the machine is running, the billing
+     * clock is counting, and `startedAt` is still empty.
+     *
+     * A page built on `startedAt` alone then told the customer "billing starts
+     * when it runs" and "started: not yet" while the hourly charge was already
+     * accruing — a customer-facing statement that was false in the direction
+     * that costs trust. This is what the meter actually started on, so the page
+     * can say what is true.
+     */
+    machineStartedAt: deployment.computeClockStartedAt || null,
     stoppedAt: deployment.stoppedAt,
     createdAt: deployment.createdAt,
   };
@@ -177,6 +192,15 @@ const serialize = (deployment, { full = false } = {}) => {
     requirements: deployment.requirements,
     statusHistory: deployment.statusHistory,
     rejectionReason: deployment.rejectionReason,
+    /*
+     * Why this order is waiting, if it is — in the customer's own terms.
+     *
+     * Built by `deploymentHold.describe`, which deliberately leaves out what
+     * the machine costs us and what margin we need. That is not the
+     * customer's business, and a message explaining our pricing invites an
+     * argument about it rather than about their machine.
+     */
+    hold: require('../../services/deployment/deploymentHold').describe(deployment),
     provisionedAt: deployment.provisionedAt,
     terminatedAt: deployment.terminatedAt,
     endpoint: {
@@ -249,6 +273,69 @@ const getQuestionnaire = async (req, res) => {
  * does not. Rather than encode a parts list into a URL, the same handler also
  * answers POST and reads the choice from whichever side carried it.
  */
+/**
+ * GET /api/v1/customer/deployments/places
+ *
+ * Where this model on this machine can run, and what each place costs.
+ *
+ * ── Why the price belongs next to the choice ──
+ *
+ * The same machine costs a different amount in each region — on AWS a region
+ * carries a standing NAT charge of its own, which is real money whether one
+ * customer is there or a hundred. A region picker that lists bare names makes
+ * the customer choose blind and then meet a number at checkout they had no way
+ * to predict.
+ *
+ * ── Why only places that can actually be built ──
+ *
+ * A tier's region list is what an operator put on it. Whether a region can be
+ * served is a different thing: its price has to be worked out, and the cloud
+ * the model runs on has to be able to build there. Offering a region we cannot
+ * fill is taking an order we cannot honour.
+ */
+const getPlaces = async (req, res) => {
+  try {
+    const { modelId, tierId } = req.query;
+    if (!modelId || !tierId) {
+      return res.status(400).json({
+        success: false,
+        message: 'A model and a machine are both needed to say where it can run.',
+      });
+    }
+
+    const settings = await billingModeService.getBillingSettings();
+    const model = await catalogService.findModelByIdentifier(modelId);
+    if (!model || !model.isActive) {
+      return res.status(404).json({ success: false, message: 'Model not found' });
+    }
+
+    /*
+     * Resolved without a region on purpose: this call exists to find out which
+     * regions there are, so asking for one would be circular. The resolver
+     * answers with every place and quotes the cheapest.
+     */
+    const resolved = await machineChoice.resolve({ model, tierId, settings });
+    if (resolved.error) {
+      return res.status(resolved.error.status).json({
+        success: false, code: resolved.error.code, message: resolved.error.message,
+      });
+    }
+
+    const { machine } = resolved;
+    res.json({
+      success: true,
+      places: machine.places || [],
+      currency: machine.currency,
+      // Which cloud this model runs on, or null when a person decides later.
+      // The customer never picks this; it follows the model.
+      cloud: machine.cloud ?? null,
+    });
+  } catch (error) {
+    console.error('Get places error:', error);
+    res.status(500).json({ success: false, message: 'Error working out where this can run' });
+  }
+};
+
 const getCheckoutOptions = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
@@ -272,7 +359,11 @@ const getCheckoutOptions = async (req, res) => {
      * deliberately not required at quote time — it is transient, and refusing
      * to even price an out-of-stock machine tells the customer nothing.
      */
-    const resolved = await machineChoice.resolve({ model, tierId, customBuild, settings });
+    // `region` is optional on a quote: with none, the cheapest place is
+    // quoted, so the first figure a customer sees is one they could have.
+    const resolved = await machineChoice.resolve({
+      model, tierId, customBuild, settings, region: req.query.region || req.body?.region || null,
+    });
     if (resolved.error) {
       return res.status(resolved.error.status).json({
         success: false, code: resolved.error.code, message: resolved.error.message,
@@ -465,8 +556,16 @@ const createDeployment = async (req, res) => {
      * VRAM than the model needs to load at all. Nothing here trusts a price
      * from the client.
      */
+    /*
+     * The region goes in here, not after the fact.
+     *
+     * The rate depends on it — the same machine costs a different amount on
+     * each cloud and in each region — so resolving without it would price the
+     * order somewhere the customer is not getting. An unknown region comes
+     * back as a refusal rather than being quietly swapped for another.
+     */
     const resolved = await machineChoice.resolve({
-      model, tierId, customBuild, settings, requireBookable: true,
+      model, tierId, customBuild, settings, requireBookable: true, region,
     });
     if (resolved.error) {
       return res.status(resolved.error.status).json({
@@ -585,6 +684,15 @@ const createDeployment = async (req, res) => {
       });
     }
 
+    /*
+     * `machine.regions` now holds only the places this machine can actually be
+     * built and priced, so falling back to the first of them is safe in a way
+     * it was not before: the old list was the tier's bare availability list,
+     * which could name a region with no price and no network.
+     *
+     * A region the customer DID ask for has already been checked by
+     * `machineChoice.resolve` above, which refuses rather than substituting.
+     */
     const chosenRegion = region || machine.regions[0] || 'default';
 
     /**
@@ -792,6 +900,74 @@ const findOwned = async (req) =>
 /**
  * GET /api/v1/customer/deployments/:id
  */
+/**
+ * A machine the customer could have instead, while this one waits.
+ *
+ * ── Why this is computed here and not inside `serialize` ──
+ *
+ * Finding it costs three queries. `serialize` runs once per row in the list
+ * view, where a held order is rare and the customer is not reading the
+ * explanation anyway — so doing it there would be a few hundred queries to
+ * answer a question nobody asked. The detail page is where the hold is
+ * actually read, and where the offer has somewhere to go.
+ *
+ * Returns null, never throws: an order that is waiting must still render if
+ * the suggestion cannot be worked out.
+ */
+const buildHoldAlternative = async (deployment) => {
+  if (!deployment?.holdKind) return null;
+
+  try {
+    const holdAlternative = require('../../services/deployment/holdAlternative');
+    const tierPriceService = require('../../services/cloud/tierPriceService');
+    const cloudRouter = require('../../services/cloud/cloudRouter');
+    // This controller works through services elsewhere and has no prisma of
+    // its own; required here rather than at the top so the import tracks the
+    // one place that needs it.
+    const prisma = require('../../lib/prismaClient');
+
+    const modelId = deployment.model?.modelId || deployment.modelId;
+    if (!modelId) return null;
+
+    const model = await prisma.aIModel.findUnique({
+      where: { id: modelId },
+      select: {
+        id: true, minVramGb: true, minGpuCount: true, minVcpu: true, minRamGb: true,
+        // The slug is how the deploy wizard is addressed (`/deploy/:slug`), so
+        // without it the offer names a machine the customer then has to go and
+        // find — which is most of the way to not having suggested one.
+        slug: true,
+      },
+    });
+    if (!model) return null;
+
+    // The cloud this order is frozen to. An alternative on another cloud is
+    // not an alternative — the deployment cannot move between them.
+    const cloud = cloudRouter.cloudOf(deployment);
+    if (!cloudRouter.isCloud(cloud)) return null;
+
+    const places = await tierPriceService.alternativesFor({ model, cloud });
+
+    const offer = holdAlternative.choose({
+      kind: deployment.holdKind,
+      model,
+      current: {
+        tierId: deployment.tier?.tierId || deployment.tierId || null,
+        region: deployment.region,
+        pricePerHour: Number(deployment.pricePerHour || 0),
+      },
+      places,
+    });
+
+    const described = holdAlternative.describe(offer, { kind: deployment.holdKind });
+    // The wizard is addressed by model slug, so the offer carries one.
+    return described ? { ...described, modelSlug: model.slug || '' } : null;
+  } catch (err) {
+    console.error('[Deployment] Could not work out an alternative:', err.message);
+    return null;
+  }
+};
+
 const getDeployment = async (req, res) => {
   try {
     const deployment = await findOwned(req);
@@ -800,9 +976,38 @@ const getDeployment = async (req, res) => {
     }
 
     const settings = await billingModeService.getBillingSettings();
+
+    /*
+     * Is anything actually going to act on a region wait?
+     *
+     * `serialize` is synchronous and runs per row in the list view, so it
+     * cannot ask — it assumes the wait is automatic, which is right almost
+     * always. Here, on the one page where the customer reads the explanation,
+     * the real answer is available: with no build worker running, telling them
+     * "about 30 minutes, it will start on its own" is a promise nobody is
+     * keeping, and a missed estimate costs more than no estimate.
+     */
+    const shaped = serializeFor(req, deployment, { full: true });
+    if (shaped?.hold?.kind === 'region') {
+      const regionDemand = require('../../services/cloud/regionDemand');
+      const worker = await regionDemand.workerSeen().catch(() => ({ running: true }));
+      shaped.hold = require('../../services/deployment/deploymentHold')
+        .describe(deployment, { automatic: worker.running !== false });
+    }
+
     res.json({
       success: true,
-      deployment: serializeFor(req, deployment, { full: true }),
+      deployment: shaped,
+      /*
+       * What they could have instead, if this order is waiting.
+       *
+       * Every hold message already ends with "pick a different machine" or
+       * "pick a region we already run in". This is the half that says WHICH —
+       * without it the offer sends the customer back to the catalogue to work
+       * out for themselves what runs their model, exists where they want it,
+       * and is sellable today.
+       */
+      holdAlternative: await buildHoldAlternative(deployment),
       storageGrace: await buildStorageGraceInfo(deployment),
       // So the page offers "switch to pay-as-you-go" only to a customer who
       // can actually have it, rather than a button the server then refuses.
@@ -1172,6 +1377,7 @@ const setBillingMethod = async (req, res) => {
 module.exports = {
   getQuestionnaire,
   getCheckoutOptions,
+  getPlaces,
   createDeployment,
   getDeployments,
   getDeployment,

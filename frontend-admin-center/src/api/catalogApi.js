@@ -74,6 +74,29 @@ export const tiersApi = {
     axiosInstance
       .post('/api/v1/admin/tiers/price-preview', { components, markupPercent })
       .then((r) => r.data),
+
+  /**
+   * GET /api/v1/admin/tiers/:id/prices
+   *
+   * What this tier costs and sells for in every place it is sold — one row per
+   * cloud and region, because the same machine costs a different amount on
+   * each cloud and a different amount again in each region.
+   */
+  getPrices: (id) =>
+    axiosInstance.get(`/api/v1/admin/tiers/${id}/prices`).then((r) => r.data),
+
+  /** POST — re-read what this tier costs now, rather than waiting for the hour. */
+  refreshPrices: (id) =>
+    axiosInstance.post(`/api/v1/admin/tiers/${id}/prices/refresh`).then((r) => r.data),
+
+  /**
+   * PUT — set one place's price by hand.
+   * Send `sellPricePerHour: null` to hand it back to the hourly refresh.
+   */
+  setPrice: (id, { cloud, region, sellPricePerHour }) =>
+    axiosInstance
+      .put(`/api/v1/admin/tiers/${id}/prices`, { cloud, region, sellPricePerHour })
+      .then((r) => r.data),
 };
 
 /**

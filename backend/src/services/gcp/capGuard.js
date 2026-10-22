@@ -46,6 +46,25 @@
  */
 const KNOWN_CLOUDS = require('../cloud/cloudRouter').CLOUDS;
 
+/**
+ * The tier's disk, from whichever shape the caller handed over.
+ *
+ * `tier_storage_type` is a column on the deployment, but the wrapped document
+ * `deploymentService` returns groups it under `tier` — so reading the flat
+ * name alone found `undefined` on every real call. The cost model then had no
+ * disk type, reported the machine as unpriceable, and the guard refused:
+ * every Google deployment held with COST_UNKNOWN while the live price sat one
+ * field away.
+ *
+ * Both spellings are read because both shapes genuinely reach here. Nothing
+ * is guessed when neither is present — a wrong disk rate is invisible, a
+ * refusal is not.
+ */
+const readStorage = (deployment) => ({
+  storageType: deployment?.tier?.storageType || deployment?.tierStorageType || '',
+  storageGb: deployment?.tier?.storageGb || deployment?.tierStorageGb || 0,
+});
+
 const CODES = {
   NOT_A_CLOUD: 'NOT_A_CLOUD',
   GCP_DISABLED: 'GCP_DISABLED',
@@ -56,7 +75,15 @@ const CODES = {
   TEAM_CAP_REACHED: 'TEAM_CAP_REACHED',
   PLATFORM_CAP_REACHED: 'PLATFORM_CAP_REACHED',
   COST_UNKNOWN: 'COST_UNKNOWN',
+  /** Costs more than it sells for. The platform pays to run it. */
   MARGIN_TOO_LOW: 'MARGIN_TOO_LOW',
+  /**
+   * Above cost, but under the margin this platform is set to earn.
+   * Separate from MARGIN_TOO_LOW because the two need different answers: one
+   * is a mispriced tier, the other is usually a provider rate that moved since
+   * the order was quoted.
+   */
+  BELOW_FLOOR: 'BELOW_FLOOR',
 };
 
 const deny = (code, reason, extra = {}) => ({ ok: false, code, reason, ...extra });
@@ -93,6 +120,15 @@ const decide = (input) => {
     costPerHour = null,
     costSource = 'unknown',
     floorPrice = null,
+    /**
+     * How far under its floor a price may sit before this refuses.
+     *
+     * The same figure the price matrix uses when deciding whether a cell is
+     * sellable. Both halves have to read it, or the catalogue could offer
+     * something this then refuses to build — and nothing on either screen
+     * would explain why.
+     */
+    floorTolerancePercent = 0,
     machineType = 'the requested machine',
   } = input || {};
 
@@ -117,8 +153,17 @@ const decide = (input) => {
     );
   }
 
+  /*
+   * The settings in `gcp` belong to whichever cloud this deployment was routed
+   * to — the argument keeps its old name because this guard predates the
+   * second cloud. The messages name the right one so an operator reading a
+   * refusal is sent to the screen that can fix it.
+   */
+  const label = cloud === 'aws' ? 'AWS' : 'Google Cloud';
+  const where = cloud === 'aws' ? 'Cloud → AWS' : 'Cloud → Google Cloud';
+
   if (!gcp.enabled) {
-    return deny(CODES.GCP_DISABLED, 'Google Cloud provisioning is switched off in Admin → Integrations → Google Cloud.');
+    return deny(CODES.GCP_DISABLED, `${label} provisioning is switched off in Admin → ${where}.`);
   }
 
   /*
@@ -127,18 +172,39 @@ const decide = (input) => {
    */
   const dryRun = gcp.dryRun !== false;
   if (!dryRun) {
-    if (!gcp.projectId) {
-      return deny(CODES.GCP_NOT_CONFIGURED, 'No Google Cloud project is configured.');
-    }
-    if (!gcp.serviceAccountKeyEncrypted) {
-      return deny(CODES.GCP_NOT_CONFIGURED, 'No Google Cloud service-account key is stored.');
-    }
-    if (!gcp.customerServiceAccount) {
-      return deny(
-        CODES.GCP_NOT_CONFIGURED,
-        'No customer VM service account is configured. Without it a machine would be built outside the '
-        + 'firewall rules that keep customers apart.'
-      );
+    if (cloud === 'aws') {
+      /*
+       * AWS needs an account and a key; the per-region network is checked at
+       * build time by `awsSettingsShape`, where the region is known and the
+       * message can name it.
+       */
+      if (!gcp.accountId) {
+        return deny(CODES.GCP_NOT_CONFIGURED, `No AWS account is configured. Add it in Admin → ${where}.`);
+      }
+      if (!gcp.secretAccessKeyEncrypted) {
+        return deny(CODES.GCP_NOT_CONFIGURED, `No AWS credential is stored. Add it in Admin → ${where}.`);
+      }
+      if (!gcp.instanceProfile) {
+        return deny(
+          CODES.GCP_NOT_CONFIGURED,
+          'No customer instance profile is configured. Without it a machine would be built outside '
+          + 'the rules that keep customers apart.'
+        );
+      }
+    } else {
+      if (!gcp.projectId) {
+        return deny(CODES.GCP_NOT_CONFIGURED, 'No Google Cloud project is configured.');
+      }
+      if (!gcp.serviceAccountKeyEncrypted) {
+        return deny(CODES.GCP_NOT_CONFIGURED, 'No Google Cloud service-account key is stored.');
+      }
+      if (!gcp.customerServiceAccount) {
+        return deny(
+          CODES.GCP_NOT_CONFIGURED,
+          'No customer VM service account is configured. Without it a machine would be built outside the '
+          + 'firewall rules that keep customers apart.'
+        );
+      }
     }
   }
 
@@ -244,14 +310,61 @@ const decide = (input) => {
     }
     const cost = Number(costPerHour);
     const sell = Number(sellPricePerHour) || 0;
+
+    /*
+     * ── Losing money ──
+     *
+     * Checked first and said in its own words. "Below the floor" and "below
+     * cost" are both refusals, but only one of them is the platform paying a
+     * cloud for a machine a customer is paying us less for — and an operator
+     * reading the alert has to be able to tell which they are looking at.
+     */
     if (cost >= sell) {
       return deny(
         CODES.MARGIN_TOO_LOW,
         `"${machineType}" costs us ${cost}/hr and this deployment sells for ${sell}/hr, so every hour `
         + 'it runs loses money. Re-price the tier or record a lower cost before building it.',
-        { costPerHour: cost, sellPricePerHour: sell }
+        { costPerHour: cost, sellPricePerHour: sell, floorPrice, belowCost: true }
       );
     }
+
+    /*
+     * ── Above cost, but under the margin this platform needs ──
+     *
+     * The guard used to stop here, at break-even: a machine costing $1.0000
+     * and sold at $1.0001 was built, earning a hundredth of a cent. The target
+     * margin was computed, reported, and never enforced.
+     *
+     * ── Why this is normally a no-op, and why it still has to exist ──
+     *
+     * Prices come from the matrix, where each cell is its own floor, so a
+     * sellable cell is already at or above it. This only fires in the gap
+     * between a provider raising a rate and the hourly refresh noticing — a
+     * window of up to an hour, in which a machine would otherwise be built at
+     * yesterday's price.
+     *
+     * The tolerance is the SAME one the matrix uses. Without that, a cell the
+     * catalogue calls sellable could be refused here, and the two halves of
+     * the platform would be disagreeing about the same number — which reads,
+     * from the outside, as the order simply not working.
+     */
+    const floor = Number(floorPrice);
+    if (Number.isFinite(floor) && floor > 0) {
+      const tolerance = Number(floorTolerancePercent);
+      const slack = Number.isFinite(tolerance) && tolerance > 0 ? floor * (tolerance / 100) : 0;
+
+      if (sell < floor - slack) {
+        return deny(
+          CODES.BELOW_FLOOR,
+          `"${machineType}" costs us ${cost}/hr and needs to sell for at least ${floor.toFixed(4)}/hr `
+          + `to earn the margin this platform is set to, but this deployment sells for ${sell}/hr. `
+          + 'It would make money, just less than intended — most likely the cloud raised its price '
+          + 'since this order was quoted. Re-price the tier, or lower the target margin.',
+          { costPerHour: cost, sellPricePerHour: sell, floorPrice: floor, belowCost: false }
+        );
+      }
+    }
+
     return allow({
       costPerHour: cost,
       costSource,
@@ -363,8 +476,21 @@ const evaluate = async (deployment, options = {}) => {
       ramGb: options.plan?.ramGb,
       gpuModel: options.plan?.acceleratorLabel || options.plan?.accelerator,
       gpuCount: options.plan?.acceleratorCount,
-      storageGb: options.plan?.bootDisk?.sizeGb,
-      storageType: deployment.tierStorageType,
+      storageGb: options.plan?.bootDisk?.sizeGb || readStorage(deployment).storageGb,
+      /*
+       * `tier.storageType`, not `tierStorageType`.
+       *
+       * The column is `tier_storage_type`, but the wrapped document this is
+       * handed groups the tier's snapshot under `tier` — so the flat name is
+       * `undefined` here even though the row has "SSD" in it. The cost model
+       * then found no disk rate, reported the whole machine as unpriceable,
+       * and the guard refused: every Google deployment was held with
+       * `COST_UNKNOWN` while the live price sat one field away.
+       *
+       * Both spellings are read because the raw row is also passed in some
+       * paths, and either one alone is a silent refusal.
+       */
+      storageType: readStorage(deployment).storageType,
     },
     settings,
   }).catch((err) => {
@@ -428,11 +554,16 @@ const evaluate = async (deployment, options = {}) => {
     costPerHour: pricing.ok ? pricing.cost.totalCost : null,
     costSource: pricing.source,
     floorPrice: pricing.ok ? pricing.floorPrice : null,
+    // Read from the same setting the price matrix uses, so the catalogue and
+    // this guard cannot disagree about whether a price clears its floor.
+    floorTolerancePercent: Number(settings?.cloudPricingSettings?.floorTolerancePercent) || 0,
     machineType: machineType || 'the requested machine',
   });
 };
 
 module.exports = {
+  // Exported for tests: which shape the tier snapshot arrives in.
+  readStorage,
   CODES,
   LIVE_PHASES,
   decide,
