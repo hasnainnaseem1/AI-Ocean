@@ -36,3 +36,4 @@ crash.*.log
 gcp-key*.json
 application_default_credentials.json
 ai-ocean-builder.json
+backend-run.log
